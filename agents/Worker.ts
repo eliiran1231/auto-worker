@@ -40,4 +40,16 @@ export class Worker {
     this.workerProcess?.kill();
     this.workerProcess = null;
   }
+
+  send(message: string): void {
+    if (!this.workerProcess) {
+      throw new Error("Worker process not initialized");
+    }
+    //i could do:
+    //this.workerProcess.stdin?.write(message);
+    //or
+    //this.workerProcess.send(message);
+    //but isnt it what AO does? need to think about it. for now, just log the message
+    console.log(`Sending message to worker: ${message}`);
+  }
 }

@@ -12,6 +12,7 @@ import type { PullRequest } from "./types/PullRequest.js";
 import type { PullRequestClosedEvent } from "./types/PullRequestClosedEvent.js";
 import type { PullRequestReviewEvent } from "./types/PullRequestReviewEvent.js";
 import type { PullRequestReviewRequestEvent } from "./types/PullRequestReviewRequestEvent.js";
+import { AgentId } from "./types/AgentId.js";
 
 const git = simpleGit();
 const octokit = new Octokit({
@@ -102,7 +103,7 @@ export const addressReview = async ({
   }
 
   const worker = AgentFactory.getWorker(pullRequest.id);
-  await worker?.spawn(`you got a review on ${pullRequest.url}`);
+  await worker?.send(`you got a review on ${pullRequest.url}`);
 };
 
 export const mergePullRequest = async ({ payload }: PullRequestReviewEvent) => {
@@ -115,21 +116,21 @@ export const mergePullRequest = async ({ payload }: PullRequestReviewEvent) => {
   return data;
 };
 
-export const releaseWorker = (worker: Worker | undefined): void => {
+export const releaseWorker = (issueId: AgentId): void => {
+  const worker = AgentFactory.getWorker(issueId);
   worker?.kill();
-  AgentFactory.deleteWorker(worker?.issueId);
+  AgentFactory.deleteWorker(issueId);
 };
 
-export const releaseReviewer = (reviewer: Worker | undefined): void => {
+export const releaseReviewer = (prId: AgentId): void => {
+  const reviewer = AgentFactory.getReviewer(prId);
   reviewer?.kill();
-  AgentFactory.deleteReviewer(reviewer?.prId);
+  AgentFactory.deleteReviewer(prId);
 };
 
 export const iterationCleanup = async ({ payload }: PullRequestClosedEvent): Promise<void> => {
   const pullRequest = payload.pull_request;
   const linkedIssues = await getLinkedIssues(pullRequest);
-  const workers = linkedIssues.map((issue) => AgentFactory.getWorker(issue.id));
-  const reviewer = AgentFactory.getReviewer(pullRequest.id);
-  workers.forEach(releaseWorker);
-  releaseReviewer(reviewer);
+  linkedIssues.forEach((issue) => releaseWorker(issue.id));
+  releaseReviewer(pullRequest.id);
 };

@@ -33,11 +33,11 @@ export class AgentFactory {
     return reviewer;
   }
 
-  static deleteWorker(issueId: AgentId | undefined): void {
+  static deleteWorker(issueId: AgentId): void {
     delete AgentFactory.workers[String(issueId)];
   }
 
-  static deleteReviewer(prId: AgentId | undefined): void {
+  static deleteReviewer(prId: AgentId): void {
     delete AgentFactory.reviewers[String(prId)];
   }
 }
