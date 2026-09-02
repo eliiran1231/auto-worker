@@ -1,1 +1,4 @@
 node_modules
+dist
+graphify-out
+.env
