@@ -2,13 +2,11 @@ import path from "node:path";
 import { Octokit } from "octokit";
 import { simpleGit } from "simple-git";
 import { AgentFactory } from "./AgentFactory.js";
-import type { Worker } from "./agents/Worker.js";
 import type { LinkedIssue } from "./interfaces/LinkedIssue.js";
 import type { LinkedIssuesResponse } from "./interfaces/LinkedIssuesResponse.js";
 import type { Repository } from "./interfaces/Repository.js";
 import type { WorkItem } from "./interfaces/WorkItem.js";
 import type { IssueAssignedEvent } from "./types/IssueAssignedEvent.js";
-import type { PullRequest } from "./types/PullRequest.js";
 import type { PullRequestClosedEvent } from "./types/PullRequestClosedEvent.js";
 import type { PullRequestReviewEvent } from "./types/PullRequestReviewEvent.js";
 import type { PullRequestReviewRequestEvent } from "./types/PullRequestReviewRequestEvent.js";
@@ -19,9 +17,10 @@ const octokit = new Octokit({
   auth: process.env.GITHUB_TOKEN,
 });
 
-export const getLinkedIssues = async (
-  pullRequest: PullRequest,
-): Promise<LinkedIssue[]> => {
+const linkedIssuesMap = new Map<number, LinkedIssue[]>();
+
+export const getLinkedIssues = async (pr: number,repo: string, login: string): Promise<LinkedIssue[]> => {
+  if (linkedIssuesMap.has(pr)) return linkedIssuesMap.get(pr)!;
   const { repository } = await octokit.graphql<LinkedIssuesResponse>(
     `
       query($owner: String!, $repo: String!, $pr: Int!) {
@@ -39,13 +38,15 @@ export const getLinkedIssues = async (
       }
     `,
     {
-      owner: pullRequest.base.repo.owner.login,
-      repo: pullRequest.base.repo.name,
-      pr: pullRequest.number,
+      owner: login,
+      repo: repo,
+      pr: pr,
     },
   );
 
-  return repository.pullRequest.closingIssuesReferences.nodes;
+  const issues = repository.pullRequest.closingIssuesReferences.nodes;
+  linkedIssuesMap.set(pr, issues);
+  return issues;
 };
 
 export const setupWorkspace = async (
@@ -101,8 +102,8 @@ export const addressReview = async ({
   ) {
     return;
   }
-
-  const worker = AgentFactory.getWorker(pullRequest.id);
+  const linkedIssues = await getLinkedIssues(pullRequest.number, pullRequest.base.repo.name, pullRequest.base.repo.owner!.login);
+  const worker = AgentFactory.getWorker(linkedIssues[0].id);
   await worker?.send(`you got a review on ${pullRequest.url}`);
 };
 
@@ -130,7 +131,7 @@ export const releaseReviewer = (prId: AgentId): void => {
 
 export const iterationCleanup = async ({ payload }: PullRequestClosedEvent): Promise<void> => {
   const pullRequest = payload.pull_request;
-  const linkedIssues = await getLinkedIssues(pullRequest);
+  const linkedIssues = await getLinkedIssues(pullRequest.number, pullRequest.base.repo.name, pullRequest.base.repo.owner!.login);
   linkedIssues.forEach((issue) => releaseWorker(issue.id));
   releaseReviewer(pullRequest.id);
 };
