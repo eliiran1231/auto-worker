@@ -24,6 +24,9 @@ webhooks.on("pull_request_review.submitted", async ({ payload }) => {
   const pullRequest = payload.pull_request;
   switch (payload.review.state.toLowerCase()) {
     case "approved":
+      if (payload.review.user!.login !== settings.github.username || pullRequest.draft) {
+        return;
+      }
       await orchestrator.mergePullRequest(pullRequest);
       break;
 
@@ -32,19 +35,20 @@ webhooks.on("pull_request_review.submitted", async ({ payload }) => {
         return;
       }
       await orchestrator.tellAssignedWorkerToAddressReview(pullRequest);
+      await orchestrator.makePullRequestReadyForReview(pullRequest);
       break;
   }
 });
-webhooks.on("pull_request.ready_for_review", ({payload}) => {
+webhooks.on("pull_request.ready_for_review", async ({payload}) => {
   const pullRequest = payload.pull_request;
   const hasReviewer = !!AgentFactory.getReviewer(payload.pull_request.id);
   hasReviewer ?
-   orchestrator.tellReviewerToReReviewPR(pullRequest) :
-   orchestrator.spawnReviewerForPR(pullRequest);
+   await orchestrator.tellReviewerToReReviewPR(pullRequest) :
+   await orchestrator.spawnReviewerForPR(pullRequest);
 });
-webhooks.on("pull_request.closed", ({ payload }) => {
-  orchestrator.iterationCleanup(payload.pull_request);
-});
+webhooks.on("pull_request.closed", async ({ payload }) => 
+  await orchestrator.iterationCleanup(payload.pull_request)
+);
 
 app.use(settings.server.webhookPath, createNodeMiddleware(webhooks));
 

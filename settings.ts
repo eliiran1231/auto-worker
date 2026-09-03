@@ -14,7 +14,6 @@ if (!settingsUrl) {
 export const settings = JSON.parse(
   readFileSync(settingsUrl, "utf8"),
 ) as Settings;
-
 if (!settings.github.username.trim()) {
   throw new Error("Set github.username in settings.json");
 }

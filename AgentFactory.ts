@@ -1,44 +1,46 @@
-import { Worker } from "./agents/Worker.js";
+import { Coder } from "./agents/Coder.js";
+import { Reviewer } from "./agents/Reviewer.js";
+import { Worker } from "./classes/Worker.js";
 import { settings } from "./settings.js";
 import type { AgentId } from "./types/AgentId.js";
 
 export class AgentFactory {
-  static workers: Record<string, Worker> = {};
-  static reviewers: Record<string, Worker> = {};
+  static coders: Record<string, Coder> = {};
+  static reviewers: Record<string, Reviewer> = {};
 
-  static registerWorker(issueId: AgentId, worker: Worker): void {
-    AgentFactory.workers[issueId] = worker;
+  static registerCoder(issueId: AgentId, coder: Coder): void {
+    AgentFactory.coders[issueId] = coder;
   }
 
-  static getWorker(issueId: AgentId): Worker | undefined {
-    return AgentFactory.workers[issueId];
+  static getCoder(issueId: AgentId): Coder | undefined {
+    return AgentFactory.coders[issueId];
   }
 
-  static registerReviewer(prId: AgentId, reviewer: Worker): void {
+  static registerReviewer(prId: AgentId, reviewer: Reviewer): void {
     AgentFactory.reviewers[prId] = reviewer;
   }
 
-  static getReviewer(prId: AgentId): Worker | undefined {
+  static getReviewer(prId: AgentId): Reviewer | undefined {
     return AgentFactory.reviewers[prId];
   }
 
-  static createWorker(issueId: AgentId, rootPath?: string): Worker {
-    const worker = new Worker(
+  static createCoder(issueId: AgentId, rootPath?: string): Coder {
+    const coder = new Coder(
       settings.agents.workerType,
       rootPath ?? settings.workspace.defaultRoot,
     );
-    this.registerWorker(issueId, worker);
-    return worker;
+    this.registerCoder(issueId, coder);
+    return coder;
   }
 
-  static createReviewer(prId: AgentId, rootPath?: string): Worker {
-    const reviewer = new Worker(settings.agents.reviewerType, rootPath);
+  static createReviewer(prId: AgentId, rootPath?: string): Reviewer {
+    const reviewer = new Reviewer(settings.agents.reviewerType, rootPath);
     this.registerReviewer(prId, reviewer);
     return reviewer;
   }
 
-  static deleteWorker(issueId: AgentId): void {
-    delete AgentFactory.workers[String(issueId)];
+  static deleteCoder(issueId: AgentId): void {
+    delete AgentFactory.coders[String(issueId)];
   }
 
   static deleteReviewer(prId: AgentId): void {

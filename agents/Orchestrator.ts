@@ -8,11 +8,8 @@ import type { Repository } from "../interfaces/Repository.js";
 import type { WorkItem } from "../interfaces/WorkItem.js";
 import { settings } from "../settings.js";
 import type { AgentId } from "../types/AgentId.js";
-import type { IssueAssignedEvent } from "../types/IssueAssignedEvent.js";
-import type { PullRequestClosedEvent } from "../types/PullRequestClosedEvent.js";
-import type { PullRequestReviewEvent } from "../types/PullRequestReviewEvent.js";
-import type { PullRequestReviewRequestEvent } from "../types/PullRequestReviewRequestEvent.js";
-import { ClosedPullRequest, PullRequest } from "../types/PullRequest.js";
+import { PullRequest } from "../types/PullRequest.js";
+import { formatTemplate } from "../utils/templates.js";
 
 export class Orchestrator {
   private readonly git = simpleGit();
@@ -49,7 +46,7 @@ export class Orchestrator {
     issue: WorkItem,
     repository: Repository,
   ): Promise<string> {
-    const clonedRepoPath = this.formatTemplate(
+    const clonedRepoPath = formatTemplate(
       settings.workspace.issueDirectoryTemplate,
       {
         repositoryPrefix: repository.name.slice(
@@ -72,12 +69,8 @@ export class Orchestrator {
       issue,
       repository,
     );
-    const worker = AgentFactory.createWorker(issue.id, repoPath);
-    await worker.spawn(
-      this.formatTemplate(settings.prompts.workOnIssue, {
-        issueNumber: issue.number,
-      }),
-    );
+    const coder = AgentFactory.createCoder(issue.id, repoPath);
+    await coder.solveIssue(issue);
   }
 
   async spawnReviewerForPR(pullRequest: PullRequest): Promise<void> {
@@ -89,27 +82,20 @@ export class Orchestrator {
     }
 
     const reviewer = AgentFactory.createReviewer(pullRequest.id);
-    await reviewer.spawn(
-      this.formatTemplate(settings.prompts.reviewPullRequest, {
-        pullRequestUrl: pullRequest.url,
-      }),
-    );
+    await reviewer.reviewPullRequest(pullRequest);
   }
 
-  tellReviewerToReReviewPR(pullRequest: PullRequest): void {
+  async tellReviewerToReReviewPR(pullRequest: PullRequest) {
     if (
       pullRequest.assignee?.login !== settings.github.username ||
       pullRequest.draft
-    ) {
-      return;
-    }
+    ) return;
 
     const reviewer = AgentFactory.getReviewer(pullRequest.id);
-    reviewer?.send(
-      this.formatTemplate(settings.prompts.reReviewPullRequest, {
-        pullRequestUrl: pullRequest.url,
-      }),
-    );
+    if (!reviewer) throw new Error(
+        `No reviewer found for ${pullRequest.base.repo.owner!.login}/${pullRequest.base.repo.name}#${pullRequest.number}`,
+      );
+    return reviewer.reReviewPullRequest(pullRequest);
   }
 
   async tellAssignedWorkerToAddressReview(pullRequest: PullRequest): Promise<void> {
@@ -127,12 +113,28 @@ export class Orchestrator {
       );
     }
 
-    const worker = AgentFactory.getWorker(linkedIssues[0].id);
-    await worker?.send(
-      this.formatTemplate(settings.prompts.addressReview, {
-        pullRequestUrl: pullRequest.url,
-      }),
+    const coder = AgentFactory.getCoder(linkedIssues[0].id);
+    if (!coder) throw new Error (
+      `No coder found for linked issue ${linkedIssues[0].id} of ${owner}/${repo}#${pullRequest.number}`,
     );
+    await coder.addressReview(pullRequest);
+  }
+
+  async makePullRequestReadyForReview(pullRequest: PullRequest) {
+    return this.octokit.graphql(`
+      mutation($pullRequestId: ID!) {
+        markPullRequestReadyForReview(
+          input: { pullRequestId: $pullRequestId }
+        ) {
+          pullRequest {
+            id
+            isDraft
+          }
+        }
+      }
+    `, {
+      pullRequestId: pullRequest.node_id,
+    });
   }
 
   async mergePullRequest(pullRequest: PullRequest): Promise<any> {
@@ -145,9 +147,9 @@ export class Orchestrator {
   }
 
   releaseWorker(issueId: AgentId): void {
-    const worker = AgentFactory.getWorker(issueId);
+    const worker = AgentFactory.getCoder(issueId);
     worker?.kill();
-    AgentFactory.deleteWorker(issueId);
+    AgentFactory.deleteCoder(issueId);
   }
 
   releaseReviewer(prId: AgentId): void {
@@ -178,14 +180,5 @@ export class Orchestrator {
     pr: number,
   ): string {
     return `${owner}/${repo}#${pr}`;
-  }
-
-  private formatTemplate(
-    template: string,
-    values: Record<string, string | number>,
-  ): string {
-    return template.replace(/\{(\w+)\}/g, (placeholder, key: string) =>
-      key in values ? String(values[key]) : placeholder,
-    );
   }
 }
