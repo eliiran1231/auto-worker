@@ -10,7 +10,7 @@ export type WorkerType = "codex" | "claude";
 export class Worker {
   initialized = false;
   readonly type: WorkerType;
-  root: string;
+  root?: string;
   conversationId?: string;
 
   private readonly codex = new Codex();
@@ -21,7 +21,7 @@ export class Worker {
   private stopped = false;
   private generation = 0;
 
-  constructor(type: WorkerType, root: string) {
+  constructor(type: WorkerType, root?: string) {
     this.type = type;
     this.root = root;
   }
@@ -87,7 +87,7 @@ export class Worker {
     generation: number,
   ): Promise<number> {
     this.codexThread ??= this.codex.startThread({
-      workingDirectory: this.root,
+      ...(this.root ? { workingDirectory: this.root } : {}),
     });
     const codexThread = this.codexThread;
 
@@ -122,8 +122,8 @@ export class Worker {
     const claudeQuery = queryClaude({
       prompt,
       options: {
-        cwd: this.root,
         abortController,
+        ...(this.root ? { cwd: this.root } : {}),
         ...(this.conversationId ? { resume: this.conversationId } : {}),
       },
     });

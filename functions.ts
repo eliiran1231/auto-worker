@@ -18,7 +18,13 @@ const octokit = new Octokit({
   auth: process.env.GITHUB_TOKEN,
 });
 
-const linkedIssuesMap = new Map<number, LinkedIssue[]>();
+const linkedIssuesMap = new Map<string, LinkedIssue[]>();
+
+const linkedIssuesCacheKey = (
+  owner: string,
+  repo: string,
+  pr: number,
+): string => `${owner}/${repo}#${pr}`;
 
 const formatTemplate = (
   template: string,
@@ -28,12 +34,19 @@ const formatTemplate = (
     key in values ? String(values[key]) : placeholder,
   );
 
-export const getLinkedIssues = async (pr: number,repo: string, login: string): Promise<LinkedIssue[]> => {
-  if (linkedIssuesMap.has(pr)) return linkedIssuesMap.get(pr)!;
+export const getLinkedIssues = async (
+  pr: number,
+  repo: string,
+  owner: string,
+): Promise<LinkedIssue[]> => {
+  const cacheKey = linkedIssuesCacheKey(owner, repo, pr);
+  const cachedIssues = linkedIssuesMap.get(cacheKey);
+  if (cachedIssues) return cachedIssues;
+
   const { repository } = await octokit.graphql<LinkedIssuesResponse>(
     settings.queries.linkedIssues,
     {
-      owner: login,
+      owner,
       repo: repo,
       pr: pr,
       limit: settings.github.linkedIssuesLimit,
@@ -41,7 +54,7 @@ export const getLinkedIssues = async (pr: number,repo: string, login: string): P
   );
 
   const issues = repository.pullRequest.closingIssuesReferences.nodes;
-  linkedIssuesMap.set(pr, issues);
+  linkedIssuesMap.set(cacheKey, issues);
   return issues;
 };
 
@@ -111,7 +124,21 @@ export const addressReview = async ({
   ) {
     return;
   }
-  const linkedIssues = await getLinkedIssues(pullRequest.number, pullRequest.base.repo.name, pullRequest.base.repo.owner!.login);
+
+  const repo = pullRequest.base.repo.name;
+  const owner = pullRequest.base.repo.owner!.login;
+  const linkedIssues = await getLinkedIssues(
+    pullRequest.number,
+    repo,
+    owner,
+  );
+
+  if (linkedIssues.length !== 1) {
+    throw new Error(
+      `Expected exactly one linked issue for ${owner}/${repo}#${pullRequest.number}, found ${linkedIssues.length}`,
+    );
+  }
+
   const worker = AgentFactory.getWorker(linkedIssues[0].id);
   await worker?.send(
     formatTemplate(settings.prompts.addressReview, {
@@ -142,9 +169,19 @@ export const releaseReviewer = (prId: AgentId): void => {
   AgentFactory.deleteReviewer(prId);
 };
 
-export const iterationCleanup = async ({ payload }: PullRequestClosedEvent): Promise<void> => {
+export const iterationCleanup = async ({
+  payload,
+}: PullRequestClosedEvent): Promise<void> => {
   const pullRequest = payload.pull_request;
-  const linkedIssues = await getLinkedIssues(pullRequest.number, pullRequest.base.repo.name, pullRequest.base.repo.owner!.login);
+  const repo = pullRequest.base.repo.name;
+  const owner = pullRequest.base.repo.owner!.login;
+  const linkedIssues = await getLinkedIssues(
+    pullRequest.number,
+    repo,
+    owner,
+  );
+
+  linkedIssuesMap.delete(linkedIssuesCacheKey(owner, repo, pullRequest.number));
   linkedIssues.forEach((issue) => releaseWorker(issue.id));
   releaseReviewer(pullRequest.id);
 };

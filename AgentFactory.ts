@@ -32,10 +32,7 @@ export class AgentFactory {
   }
 
   static createReviewer(prId: AgentId, rootPath?: string): Worker {
-    const reviewer = new Worker(
-      settings.agents.reviewerType,
-      rootPath ?? settings.workspace.defaultRoot,
-    );
+    const reviewer = new Worker(settings.agents.reviewerType, rootPath);
     this.registerReviewer(prId, reviewer);
     return reviewer;
   }
