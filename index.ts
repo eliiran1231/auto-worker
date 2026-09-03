@@ -1,6 +1,7 @@
 import express from "express";
 import { Webhooks, createNodeMiddleware } from "@octokit/webhooks";
 import "dotenv/config";
+import { settings } from "./settings.js";
 import {
   addressReview,
   iterationCleanup,
@@ -10,7 +11,7 @@ import {
 } from "./functions.js";
 
 const app = express();
-const port = process.env.PORT ?? 3000;
+const port = settings.server.port;
 
 const webhooks = new Webhooks({
   secret: process.env.WEBHOOK_SECRET!,
@@ -32,7 +33,7 @@ webhooks.on("pull_request_review.submitted", async (event) => {
 webhooks.on("pull_request.ready_for_review", requestReview);
 webhooks.on("pull_request.closed", iterationCleanup);
 
-app.use("/webhook", createNodeMiddleware(webhooks));
+app.use(settings.server.webhookPath, createNodeMiddleware(webhooks));
 
 app.listen(port, () => {
   console.log(`🚀 Server is listening for GitHub webhooks on port ${port}`);

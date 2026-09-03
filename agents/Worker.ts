@@ -21,7 +21,7 @@ export class Worker {
   private stopped = false;
   private generation = 0;
 
-  constructor(type: WorkerType, root = "c:/") {
+  constructor(type: WorkerType, root: string) {
     this.type = type;
     this.root = root;
   }

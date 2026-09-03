@@ -1,4 +1,5 @@
 import { Worker } from "./agents/Worker.js";
+import { settings } from "./settings.js";
 import type { AgentId } from "./types/AgentId.js";
 
 export class AgentFactory {
@@ -22,13 +23,19 @@ export class AgentFactory {
   }
 
   static createWorker(issueId: AgentId, rootPath?: string): Worker {
-    const worker = new Worker("codex", rootPath);
+    const worker = new Worker(
+      settings.agents.workerType,
+      rootPath ?? settings.workspace.defaultRoot,
+    );
     this.registerWorker(issueId, worker);
     return worker;
   }
 
   static createReviewer(prId: AgentId, rootPath?: string): Worker {
-    const reviewer = new Worker("claude", rootPath);
+    const reviewer = new Worker(
+      settings.agents.reviewerType,
+      rootPath ?? settings.workspace.defaultRoot,
+    );
     this.registerReviewer(prId, reviewer);
     return reviewer;
   }

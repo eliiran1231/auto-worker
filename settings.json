@@ -1,0 +1,27 @@
+{
+  "server": {
+    "port": 3000,
+    "webhookPath": "/webhook"
+  },
+  "github": {
+    "username": "eliiran1231",
+    "linkedIssuesLimit": 10
+  },
+  "workspace": {
+    "defaultRoot": "c:/",
+    "repositoryPrefixLength": 3,
+    "issueDirectoryTemplate": "./{repositoryPrefix}-i-{issueNumber}"
+  },
+  "agents": {
+    "workerType": "codex",
+    "reviewerType": "claude"
+  },
+  "prompts": {
+    "workOnIssue": "work on issue #{issueNumber} and open a PR",
+    "reviewPullRequest": "review this pull request {pullRequestUrl}. if you approve, submit approval. if you don't approve, submit changes requested with your feedback. make sure to run the differential test before approving",
+    "addressReview": "you got a review on {pullRequestUrl}"
+  },
+  "queries": {
+    "linkedIssues": "query($owner: String!, $repo: String!, $pr: Int!, $limit: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $pr) { closingIssuesReferences(first: $limit) { nodes { id number title } } } } }"
+  }
+}

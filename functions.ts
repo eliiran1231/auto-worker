@@ -5,6 +5,7 @@ import { AgentFactory } from "./AgentFactory.js";
 import type { LinkedIssue } from "./interfaces/LinkedIssue.js";
 import type { LinkedIssuesResponse } from "./interfaces/LinkedIssuesResponse.js";
 import type { Repository } from "./interfaces/Repository.js";
+import { settings } from "./settings.js";
 import type { WorkItem } from "./interfaces/WorkItem.js";
 import type { IssueAssignedEvent } from "./types/IssueAssignedEvent.js";
 import type { PullRequestClosedEvent } from "./types/PullRequestClosedEvent.js";
@@ -19,28 +20,23 @@ const octokit = new Octokit({
 
 const linkedIssuesMap = new Map<number, LinkedIssue[]>();
 
+const formatTemplate = (
+  template: string,
+  values: Record<string, string | number>,
+): string =>
+  template.replace(/\{(\w+)\}/g, (placeholder, key: string) =>
+    key in values ? String(values[key]) : placeholder,
+  );
+
 export const getLinkedIssues = async (pr: number,repo: string, login: string): Promise<LinkedIssue[]> => {
   if (linkedIssuesMap.has(pr)) return linkedIssuesMap.get(pr)!;
   const { repository } = await octokit.graphql<LinkedIssuesResponse>(
-    `
-      query($owner: String!, $repo: String!, $pr: Int!) {
-        repository(owner: $owner, name: $repo) {
-          pullRequest(number: $pr) {
-            closingIssuesReferences(first: 10) {
-              nodes {
-                id
-                number
-                title
-              }
-            }
-          }
-        }
-      }
-    `,
+    settings.queries.linkedIssues,
     {
       owner: login,
       repo: repo,
       pr: pr,
+      limit: settings.github.linkedIssuesLimit,
     },
   );
 
@@ -53,7 +49,16 @@ export const setupWorkspace = async (
   issue: WorkItem,
   repository: Repository,
 ): Promise<string> => {
-  const clonedRepoPath = `./${repository.name.slice(0, 3)}-i-${issue.number}`;
+  const clonedRepoPath = formatTemplate(
+    settings.workspace.issueDirectoryTemplate,
+    {
+      repositoryPrefix: repository.name.slice(
+        0,
+        settings.workspace.repositoryPrefixLength,
+      ),
+      issueNumber: issue.number,
+    },
+  );
   await git.clone(repository.clone_url, clonedRepoPath);
   return path.resolve(clonedRepoPath);
 };
@@ -61,14 +66,16 @@ export const setupWorkspace = async (
 export const workOnIssue = async ({
   payload,
 }: IssueAssignedEvent): Promise<void> => {
-  if (payload.issue.assignee?.login !== process.env.GITHUB_USERNAME) {
+  if (payload.issue.assignee?.login !== settings.github.username) {
     return;
   }
 
   const repoPath = await setupWorkspace(payload.issue, payload.repository);
   const worker = AgentFactory.createWorker(payload.issue.id, repoPath);
   await worker.spawn(
-    `work on issue #${payload.issue.number} and open a PR`,
+    formatTemplate(settings.prompts.workOnIssue, {
+      issueNumber: payload.issue.number,
+    }),
   );
 };
 
@@ -77,7 +84,7 @@ export const requestReview = async ({
 }: PullRequestReviewRequestEvent): Promise<void> => {
   const pullRequest = payload.pull_request;
   if (
-    pullRequest.assignee?.login !== process.env.GITHUB_USERNAME ||
+    pullRequest.assignee?.login !== settings.github.username ||
     pullRequest.draft
   ) {
     return;
@@ -87,7 +94,9 @@ export const requestReview = async ({
    AgentFactory.getReviewer(pullRequest.id) ??
    AgentFactory.createReviewer(pullRequest.id);
   await reviewer?.spawn(
-    `review this pull request ${pullRequest.url}. if you approve, submit approval if you don't approve, submit changes requested with your feedback. make sure to run the differential test before approving`,
+    formatTemplate(settings.prompts.reviewPullRequest, {
+      pullRequestUrl: pullRequest.url,
+    }),
   );
 };
 
@@ -97,14 +106,18 @@ export const addressReview = async ({
   const review = payload.review;
   const pullRequest = payload.pull_request;
   if (
-    review.user!.login !== process.env.GITHUB_USERNAME ||
+    review.user!.login !== settings.github.username ||
     pullRequest.draft
   ) {
     return;
   }
   const linkedIssues = await getLinkedIssues(pullRequest.number, pullRequest.base.repo.name, pullRequest.base.repo.owner!.login);
   const worker = AgentFactory.getWorker(linkedIssues[0].id);
-  await worker?.send(`you got a review on ${pullRequest.url}`);
+  await worker?.send(
+    formatTemplate(settings.prompts.addressReview, {
+      pullRequestUrl: pullRequest.url,
+    }),
+  );
 };
 
 export const mergePullRequest = async ({ payload }: PullRequestReviewEvent) => {
