@@ -17,6 +17,7 @@ export interface Settings {
     reviewerType: "codex" | "claude";
   };
   prompts: {
+    reReviewPullRequest: string;
     workOnIssue: string;
     reviewPullRequest: string;
     addressReview: string;
