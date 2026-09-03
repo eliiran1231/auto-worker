@@ -6,10 +6,12 @@ import {
 import { Codex, type Thread as CodexThread } from "@openai/codex-sdk";
 
 export type WorkerType = "codex" | "claude";
+export type WorkerStatus = "idle" | "working" | "error";
 
 export class Worker {
   initialized = false;
   readonly type: WorkerType;
+  status: WorkerStatus = "idle";
   root?: string;
   conversationId?: string;
 

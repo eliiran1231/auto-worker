@@ -35,17 +35,26 @@ webhooks.on("pull_request_review.submitted", async ({ payload }) => {
         return;
       }
       await orchestrator.tellAssignedWorkerToAddressReview(pullRequest);
-      await orchestrator.makePullRequestReadyForReview(pullRequest);
       break;
   }
 });
-webhooks.on("pull_request.ready_for_review", async ({payload}) => {
+
+webhooks.on("pull_request.synchronize", async ({payload}) => {
   const pullRequest = payload.pull_request;
-  const hasReviewer = !!AgentFactory.getReviewer(payload.pull_request.id);
-  hasReviewer ?
-   await orchestrator.tellReviewerToReReviewPR(pullRequest) :
-   await orchestrator.spawnReviewerForPR(pullRequest);
+  if (pullRequest.assignee?.login !== settings.github.username 
+    || pullRequest.draft
+    || pullRequest.state.toLowerCase() !== "open"
+  ) {
+    return;
+  }
+  const reviewer = AgentFactory.getReviewer(payload.pull_request.id);
+  if (reviewer) {
+    if (reviewer.status === "idle") {
+      await orchestrator.tellReviewerToReReviewPR(pullRequest);
+    }
+  } else await orchestrator.spawnReviewerForPR(pullRequest);
 });
+
 webhooks.on("pull_request.closed", async ({ payload }) => 
   await orchestrator.iterationCleanup(payload.pull_request)
 );

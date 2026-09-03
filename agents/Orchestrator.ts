@@ -120,23 +120,6 @@ export class Orchestrator {
     await coder.addressReview(pullRequest);
   }
 
-  async makePullRequestReadyForReview(pullRequest: PullRequest) {
-    return this.octokit.graphql(`
-      mutation($pullRequestId: ID!) {
-        markPullRequestReadyForReview(
-          input: { pullRequestId: $pullRequestId }
-        ) {
-          pullRequest {
-            id
-            isDraft
-          }
-        }
-      }
-    `, {
-      pullRequestId: pullRequest.node_id,
-    });
-  }
-
   async mergePullRequest(pullRequest: PullRequest): Promise<any> {
     const { data } = await this.octokit.rest.pulls.merge({
       owner: pullRequest.base.repo.owner!.login,
