@@ -22,6 +22,7 @@ export class Worker {
   private turnQueue: Promise<void> = Promise.resolve();
   private stopped = false;
   private generation = 0;
+  private pendingTurns = 0;
 
   constructor(type: WorkerType, root?: string) {
     this.type = type;
@@ -39,6 +40,7 @@ export class Worker {
     this.initialized = true;
     this.stopped = false;
     this.generation += 1;
+    this.pendingTurns = 0;
 
     return this.enqueueTurn(prompt, this.generation);
   }
@@ -61,9 +63,14 @@ export class Worker {
     this.codexThread = null;
     this.initialized = false;
     this.generation += 1;
+    this.pendingTurns = 0;
+    this.status = "idle";
   }
 
   private enqueueTurn(prompt: string, generation: number): Promise<number> {
+    this.pendingTurns += 1;
+    this.status = "working";
+
     const turn = this.turnQueue.then(async () => {
       if (this.stopped || generation !== this.generation) {
         throw new Error("Worker has been stopped");
@@ -74,14 +81,37 @@ export class Worker {
         : this.runClaudeTurn(prompt, generation);
     });
 
+    const trackedTurn = turn.then(
+      (result) => {
+        this.finishTurn(generation, false);
+        return result;
+      },
+      (error: unknown) => {
+        this.finishTurn(generation, true);
+        throw error;
+      },
+    );
+
     // Keep the queue usable after a failed turn while preserving the failure for
     // the caller awaiting this particular turn.
-    this.turnQueue = turn.then(
+    this.turnQueue = trackedTurn.then(
       () => undefined,
       () => undefined,
     );
 
-    return turn;
+    return trackedTurn;
+  }
+
+  private finishTurn(generation: number, failed: boolean): void {
+    if (generation !== this.generation) return;
+
+    this.pendingTurns = Math.max(0, this.pendingTurns - 1);
+    if (this.pendingTurns > 0) {
+      this.status = "working";
+      return;
+    }
+
+    this.status = failed ? "error" : "idle";
   }
 
   private async runCodexTurn(

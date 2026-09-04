@@ -35,7 +35,7 @@ export class AgentFactory {
 
   static createCoder(issueId: AgentId, rootPath?: string): Coder {
     const coder = new Coder(
-      settings.agents.workerType,
+      settings.agents.coderType,
       rootPath ?? settings.workspace.defaultRoot,
     );
     this.registerCoder(issueId, coder);

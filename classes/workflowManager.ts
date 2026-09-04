@@ -1,16 +1,15 @@
-import { Subject } from "rxjs";
+import { ReplaySubject } from "rxjs";
 import type { WorkflowRun } from "../types/WorkflowRun.js";
 import type { Repository } from "../interfaces/Repository.js";
 
 export class WorkflowManager {
-    private static onWorkflowRunCompleted: Record<string, Subject<WorkflowRun>> = {};
+    private static onWorkflowRunCompleted: Record<string, ReplaySubject<WorkflowRun> | undefined> = {};
     static notifyWorkflowRunCompleted(repo: Repository, workflowRun: WorkflowRun) {
-        if (this.onWorkflowRunCompleted[repo.name]) {
-            this.onWorkflowRunCompleted[repo.name].next(workflowRun);
-        }
+        const run = WorkflowManager.getWorkflowRunCompletedReplaySubject(repo);
+        if (run) run.next(workflowRun);
     }
-    static getWorkflowRunCompletedSubject(repo: Repository): Subject<WorkflowRun> {
-        this.onWorkflowRunCompleted[repo.name] ??= new Subject<WorkflowRun>();
-        return this.onWorkflowRunCompleted[repo.name];
+    static getWorkflowRunCompletedReplaySubject(repo: Repository): ReplaySubject<WorkflowRun> {
+        this.onWorkflowRunCompleted[repo.name] ??= new ReplaySubject<WorkflowRun>();
+        return this.onWorkflowRunCompleted[repo.name]!;
     }
 }

@@ -14,14 +14,14 @@
     "testerDirectoryTemplate": "./{repositoryPrefix}-tests"
   },
   "agents": {
-    "workerType": "codex",
+    "coderType": "codex",
     "reviewerType": "claude",
     "testerType": "codex"
   },
   "prompts": {
-    "workOnIssue": "work on issue #{issueNumber} and open a PR",
+    "workOnIssue": "work on issue {issueUrl} and open a PR assigned to me.",
     "reviewPullRequest": "review this pull request {pullRequestUrl}. if you approve, submit approval. if you don't approve, submit changes requested with your feedback. make sure to run the differential test before approving",
-    "reReviewPullRequest": "review the updated pull request {pullRequestUrl} again. submit approval if the requested changes are resolved; otherwise submit changes requested with clear feedback",
+    "reReviewPullRequest": "your review got a response on {pullRequestUrl}. re-review the pull request and submit your feedback. make sure to run the differential test before approving.",
     "addressReview": "you got a review on {pullRequestUrl}",
     "findBugs": "inspect this repository for reproducible compatibility gapes between this library and microsoft's original directoryServices. verify each finding and create a GitHub issue for the confirmed gaps",
     "writeTests": "inspect this repository and add focused tests for important untested behavior and likely regressions",

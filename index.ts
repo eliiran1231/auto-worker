@@ -25,14 +25,14 @@ webhooks.on("pull_request_review.submitted", async ({ payload }) => {
   const pullRequest = payload.pull_request;
   switch (payload.review.state.toLowerCase()) {
     case "approved":
-      if (payload.review.user!.login !== settings.github.username || pullRequest.draft) {
+      if (pullRequest.draft) {
         return;
       }
       await orchestrator.mergePullRequest(pullRequest);
       break;
 
     case "changes_requested":
-      if (payload.review.user!.login !== settings.github.username || pullRequest.draft) {
+      if (pullRequest.draft) {
         return;
       }
       await orchestrator.tellAssignedWorkerToAddressReview(pullRequest);
@@ -58,6 +58,7 @@ webhooks.on("pull_request.synchronize", async ({payload}) => {
 
 webhooks.on("pull_request.closed", async ({ payload }) => {
   await orchestrator.iterationCleanup(payload.pull_request);
+  if (!payload.pull_request.merged) return; 
   await orchestrator.spawnATesterToFindBugs(payload.repository);
 });
 

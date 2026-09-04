@@ -120,7 +120,7 @@ export class Orchestrator {
     if (!coder) throw new Error (
       `No coder found for linked issue ${linkedIssues[0].id} of ${owner}/${repo}#${pullRequest.number}`,
     );
-    await coder.addressReview(pullRequest);
+    if (coder.status != "working") await coder.addressReview(pullRequest);
   }
 
   async mergePullRequest(pullRequest: PullRequest): Promise<any> {

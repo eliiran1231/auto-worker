@@ -1,3 +1,4 @@
+import type { WorkerType } from "../classes/Worker.js";
 export interface Settings {
   server: {
     port: number;
@@ -14,9 +15,9 @@ export interface Settings {
     testerDirectoryTemplate: string;
   };
   agents: {
-    workerType: "codex" | "claude";
-    reviewerType: "codex" | "claude";
-    testerType: "codex" | "claude";
+    coderType: WorkerType;
+    reviewerType: WorkerType;
+    testerType: WorkerType;
   };
   prompts: {
     writeTests: string;

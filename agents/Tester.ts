@@ -40,7 +40,7 @@ export class Tester extends Worker {
 
     private async waitForWorkflowCompletion(repo: Repository, workflowRunId: number) {
         return new Promise<WorkflowRun>((resolve) => {
-            const subscription = WorkflowManager.getWorkflowRunCompletedSubject(repo)
+            const subscription = WorkflowManager.getWorkflowRunCompletedReplaySubject(repo)
             .subscribe((workflowRun) => {
                 if (workflowRun.id === workflowRunId) {
                     subscription.unsubscribe();
