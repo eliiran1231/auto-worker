@@ -4,6 +4,7 @@ import "dotenv/config";
 import { Orchestrator } from "./agents/Orchestrator.js";
 import { settings } from "./settings.js";
 import { AgentFactory } from "./AgentFactory.js";
+import { WorkflowManager } from "./classes/workflowManager.js";
 
 const app = express();
 const port = settings.server.port;
@@ -55,9 +56,15 @@ webhooks.on("pull_request.synchronize", async ({payload}) => {
   } else await orchestrator.spawnReviewerForPR(pullRequest);
 });
 
-webhooks.on("pull_request.closed", async ({ payload }) => 
-  await orchestrator.iterationCleanup(payload.pull_request)
-);
+webhooks.on("pull_request.closed", async ({ payload }) => {
+  await orchestrator.iterationCleanup(payload.pull_request);
+  await orchestrator.spawnATesterToFindBugs(payload.repository);
+});
+
+webhooks.on("workflow_run.completed", async ({ payload }) => {
+  const workflowRun = payload.workflow_run;
+  WorkflowManager.notifyWorkflowRunCompleted(payload.repository, workflowRun);
+});
 
 app.use(settings.server.webhookPath, createNodeMiddleware(webhooks));
 

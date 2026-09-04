@@ -1,3 +1,4 @@
+import { rm } from "node:fs/promises";
 import path from "node:path";
 import { Octokit } from "octokit";
 import { simpleGit } from "simple-git";
@@ -8,7 +9,7 @@ import type { Repository } from "../interfaces/Repository.js";
 import type { WorkItem } from "../interfaces/WorkItem.js";
 import { settings } from "../settings.js";
 import type { AgentId } from "../types/AgentId.js";
-import { PullRequest } from "../types/PullRequest.js";
+import type { PullRequest } from "../types/PullRequest.js";
 import { formatTemplate } from "../utils/templates.js";
 
 export class Orchestrator {
@@ -17,6 +18,7 @@ export class Orchestrator {
     auth: process.env.GITHUB_TOKEN,
   });
   private readonly linkedIssuesMap = new Map<string, LinkedIssue[]>();
+  private readonly managedWorkspaces = new Set<string>();
 
   async getLinkedIssues(
     pr: number,
@@ -43,10 +45,20 @@ export class Orchestrator {
   }
 
   async setupWorkspace(
-    issue: WorkItem,
+    clonedRepoPath: string,
     repository: Repository,
   ): Promise<string> {
-    const clonedRepoPath = formatTemplate(
+    const workspacePath = path.resolve(clonedRepoPath);
+    await this.git.clone(repository.clone_url, workspacePath);
+    this.managedWorkspaces.add(workspacePath);
+    return workspacePath;
+  }
+
+  async spawnWorkerToResolveIssue(issue : any, repository: Repository): Promise<void> {
+    if (issue.assignee?.login !== settings.github.username) {
+      return;
+    }
+    const repoPath = formatTemplate(
       settings.workspace.issueDirectoryTemplate,
       {
         repositoryPrefix: repository.name.slice(
@@ -56,20 +68,11 @@ export class Orchestrator {
         issueNumber: issue.number,
       },
     );
-    await this.git.clone(repository.clone_url, clonedRepoPath);
-    return path.resolve(clonedRepoPath);
-  }
-
-  async spawnWorkerToResolveIssue(issue : any, repository: Repository): Promise<void> {
-    if (issue.assignee?.login !== settings.github.username) {
-      return;
-    }
-
-    const repoPath = await this.setupWorkspace(
-      issue,
+    const workspacePath = await this.setupWorkspace(
+      repoPath,
       repository,
     );
-    const coder = AgentFactory.createCoder(issue.id, repoPath);
+    const coder = AgentFactory.createCoder(issue.id, workspacePath);
     await coder.solveIssue(issue);
   }
 
@@ -129,9 +132,12 @@ export class Orchestrator {
     return data;
   }
 
-  releaseWorker(issueId: AgentId): void {
-    const worker = AgentFactory.getCoder(issueId);
-    worker?.kill();
+  async releaseCoder(issueId: AgentId): Promise<void> {
+    const coder = AgentFactory.getCoder(issueId);
+    if (!coder) return;
+
+    coder.kill();
+    await this.deleteManagedWorkspace(coder.root);
     AgentFactory.deleteCoder(issueId);
   }
 
@@ -139,6 +145,15 @@ export class Orchestrator {
     const reviewer = AgentFactory.getReviewer(prId);
     reviewer?.kill();
     AgentFactory.deleteReviewer(prId);
+  }
+
+  async releaseTester(testerId: AgentId): Promise<void> {
+    const tester = AgentFactory.getTester(testerId);
+    if (!tester) return;
+
+    tester.kill();
+    await this.deleteManagedWorkspace(tester.root);
+    AgentFactory.deleteTester(testerId);
   }
 
   async iterationCleanup(pullRequest: PullRequest): Promise<void> {
@@ -153,8 +168,60 @@ export class Orchestrator {
     this.linkedIssuesMap.delete(
       this.linkedIssuesCacheKey(owner, repo, pullRequest.number),
     );
-    linkedIssues.forEach((issue) => this.releaseWorker(issue.id));
+    await Promise.all(
+      linkedIssues.map((issue) => this.releaseCoder(issue.id)),
+    );
     this.releaseReviewer(pullRequest.id);
+  }
+
+  async spawnATesterToFindBugs(repository: Repository): Promise<number> {
+    const rootPath = formatTemplate(
+      settings.workspace.testerDirectoryTemplate,
+      {
+        repositoryPrefix: repository.name.substring(
+          0,
+          settings.workspace.repositoryPrefixLength,
+        ),
+      },
+    );
+    const workspacePath = await this.setupWorkspace(rootPath, repository);
+    const tester = AgentFactory.createTester(repository.id, workspacePath);
+
+    try {
+      return await tester.findBugs();
+    } finally {
+      await this.releaseTester(repository.id);
+    }
+  }
+
+  private async deleteManagedWorkspace(root?: string): Promise<void> {
+    if (!root) return;
+
+    const workspacePath = path.resolve(root);
+    const workspaceBase = path.resolve(process.cwd());
+    const relativePath = path.relative(workspaceBase, workspacePath);
+    const isOutsideWorkspace =
+      relativePath === ".." ||
+      relativePath.startsWith(`..${path.sep}`) ||
+      path.isAbsolute(relativePath);
+
+    if (
+      !relativePath ||
+      isOutsideWorkspace ||
+      !this.managedWorkspaces.has(workspacePath)
+    ) {
+      throw new Error(
+        `Refusing to delete unmanaged workspace: ${workspacePath}`,
+      );
+    }
+
+    await rm(workspacePath, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 200,
+    });
+    this.managedWorkspaces.delete(workspacePath);
   }
 
   private linkedIssuesCacheKey(

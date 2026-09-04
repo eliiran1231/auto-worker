@@ -1,12 +1,13 @@
 import { Coder } from "./agents/Coder.js";
 import { Reviewer } from "./agents/Reviewer.js";
-import { Worker } from "./classes/Worker.js";
+import { Tester } from "./agents/Tester.js";
 import { settings } from "./settings.js";
 import type { AgentId } from "./types/AgentId.js";
 
 export class AgentFactory {
   static coders: Record<string, Coder> = {};
   static reviewers: Record<string, Reviewer> = {};
+  static testers: Record<string, Tester> = {};
 
   static registerCoder(issueId: AgentId, coder: Coder): void {
     AgentFactory.coders[issueId] = coder;
@@ -24,6 +25,14 @@ export class AgentFactory {
     return AgentFactory.reviewers[prId];
   }
 
+  static registerTester(testerId: AgentId, tester: Tester): void {
+    AgentFactory.testers[testerId] = tester;
+  }
+
+  static getTester(testerId: AgentId): Tester | undefined {
+    return AgentFactory.testers[testerId];
+  }
+
   static createCoder(issueId: AgentId, rootPath?: string): Coder {
     const coder = new Coder(
       settings.agents.workerType,
@@ -39,11 +48,21 @@ export class AgentFactory {
     return reviewer;
   }
 
+  static createTester(testerId: AgentId, rootPath?: string): Tester {
+    const tester = new Tester(settings.agents.testerType, rootPath);
+    this.registerTester(testerId, tester);
+    return tester;
+  }
+
   static deleteCoder(issueId: AgentId): void {
     delete AgentFactory.coders[String(issueId)];
   }
 
   static deleteReviewer(prId: AgentId): void {
     delete AgentFactory.reviewers[String(prId)];
+  }
+
+  static deleteTester(testerId: AgentId): void {
+    delete AgentFactory.testers[String(testerId)];
   }
 }
