@@ -1,5 +1,7 @@
-import type { Octokit } from "octokit";
+import { Octokit } from "octokit";
 import { Worker } from "../classes/Worker.js";
+import type { WorkerType } from "../classes/Worker.js";
+import { getGitHubToken } from "../utils/github.js";
 import { settings } from "../settings.js";
 import type { Repository } from "../interfaces/Repository.js";
 import type { WorkflowRun } from "../types/WorkflowRun.js";
@@ -8,6 +10,10 @@ import { formatTemplate } from "../utils/templates.js";
 
 
 export class Tester extends Worker {
+    constructor(type: WorkerType, root?: string) {
+        super(type, root, "tester");
+    }
+
     findBugs(): Promise<number> {
         return this.spawn(settings.prompts.findBugs);
     }
@@ -15,9 +21,9 @@ export class Tester extends Worker {
     private async triggerTestWorkflow(
         repo: Repository,
         workflowId: string,
-        branch: string,
-        octokit: Octokit
+        branch: string
     ) {
+        const octokit = new Octokit({ auth: getGitHubToken("tester") });
         const owner = settings.github.username;
         const ref = branch;
 
@@ -53,10 +59,9 @@ export class Tester extends Worker {
     async runTest(
         repo: Repository,
         workflowId: string,
-        branch: string,
-        octokit: Octokit
+        branch: string
     ) {
-        const workflow_run_id = await this.triggerTestWorkflow(repo, workflowId, branch, octokit);
+        const workflow_run_id = await this.triggerTestWorkflow(repo, workflowId, branch);
         const workflowRun = await this.waitForWorkflowCompletion(repo, Number(workflow_run_id));
         return workflowRun;
     }

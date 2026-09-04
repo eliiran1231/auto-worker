@@ -1,8 +1,13 @@
 import { formatTemplate } from "../utils/templates.js";
 import { settings } from "../settings.js";
 import { Worker } from "../classes/Worker.js";
+import type { WorkerType } from "../classes/Worker.js";
 
 export class Coder extends Worker {
+    constructor(type: WorkerType, root?: string) {
+        super(type, root, "coder");
+    }
+
     solveIssue(issue: any): Promise<number> {
         return this.spawn(
             formatTemplate(settings.prompts.workOnIssue, {

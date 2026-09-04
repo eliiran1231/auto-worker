@@ -11,11 +11,12 @@ import { settings } from "../settings.js";
 import type { AgentId } from "../types/AgentId.js";
 import type { PullRequest } from "../types/PullRequest.js";
 import { formatTemplate } from "../utils/templates.js";
+import { getGitHubToken, getWorkerEnvironment } from "../utils/github.js";
+import type { WorkerRole } from "../types/WorkerRole.js";
 
 export class Orchestrator {
-  private readonly git = simpleGit();
   private readonly octokit = new Octokit({
-    auth: process.env.GITHUB_TOKEN,
+    auth: getGitHubToken("coder"),
   });
   private readonly linkedIssuesMap = new Map<string, LinkedIssue[]>();
   private readonly managedWorkspaces = new Set<string>();
@@ -47,9 +48,10 @@ export class Orchestrator {
   async setupWorkspace(
     clonedRepoPath: string,
     repository: Repository,
+    role: WorkerRole = "coder",
   ): Promise<string> {
     const workspacePath = path.resolve(clonedRepoPath);
-    await this.git.clone(repository.clone_url, workspacePath);
+    await simpleGit().env(getWorkerEnvironment(role)).clone(repository.clone_url, workspacePath);
     this.managedWorkspaces.add(workspacePath);
     return workspacePath;
   }
@@ -184,7 +186,7 @@ export class Orchestrator {
         ),
       },
     );
-    const workspacePath = await this.setupWorkspace(rootPath, repository);
+    const workspacePath = await this.setupWorkspace(rootPath, repository, "tester");
     const tester = AgentFactory.createTester(repository.id, workspacePath);
 
     try {

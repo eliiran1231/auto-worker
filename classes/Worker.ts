@@ -4,6 +4,8 @@ import {
   type SDKResultMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { Codex, type Thread as CodexThread } from "@openai/codex-sdk";
+import type { WorkerRole } from "../types/WorkerRole.js";
+import { getWorkerEnvironment } from "../utils/github.js";
 
 export type WorkerType = "codex" | "claude";
 export type WorkerStatus = "idle" | "working" | "error";
@@ -15,7 +17,7 @@ export class Worker {
   root?: string;
   conversationId?: string;
 
-  private readonly codex = new Codex();
+  private codex: Codex | null = null;
   private codexThread: CodexThread | null = null;
   private claudeQuery: ClaudeQuery | null = null;
   private abortController: AbortController | null = null;
@@ -24,7 +26,7 @@ export class Worker {
   private generation = 0;
   private pendingTurns = 0;
 
-  constructor(type: WorkerType, root?: string) {
+  constructor(type: WorkerType, root: string | undefined, readonly role: WorkerRole) {
     this.type = type;
     this.root = root;
   }
@@ -118,6 +120,7 @@ export class Worker {
     prompt: string,
     generation: number,
   ): Promise<number> {
+    this.codex ??= new Codex({ env: getWorkerEnvironment(this.role) });
     this.codexThread ??= this.codex.startThread({
       ...(this.root ? { workingDirectory: this.root } : {}),
     });
@@ -154,6 +157,7 @@ export class Worker {
     const claudeQuery = queryClaude({
       prompt,
       options: {
+        env: getWorkerEnvironment(this.role),
         abortController,
         ...(this.root ? { cwd: this.root } : {}),
         ...(this.conversationId ? { resume: this.conversationId } : {}),
