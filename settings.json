@@ -1,7 +1,7 @@
 {
   "server": {
     "port": 3000,
-    "webhookPath": "/webhook"
+    "webhookPath": "/api/github/webhooks"
   },
   "github": {
     "username": "eliiran1231",
