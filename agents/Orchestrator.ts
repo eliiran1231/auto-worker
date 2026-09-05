@@ -4,6 +4,9 @@ import { Octokit } from "octokit";
 import { simpleGit } from "simple-git";
 import { AgentFactory } from "../AgentFactory.js";
 import type { LinkedIssue } from "../interfaces/LinkedIssue.js";
+import type { LinkedBranch } from "../interfaces/LinkedBranch.js";
+import type { LinkedBranchesResponse } from "../interfaces/LinkedBranchesResponse.js";
+import type { Issue } from "../types/Issue.js";
 import type { LinkedIssuesResponse } from "../interfaces/LinkedIssuesResponse.js";
 import type { Repository } from "../interfaces/Repository.js";
 import { settings } from "../settings.js";
@@ -19,6 +22,22 @@ export class Orchestrator {
   });
   private readonly linkedIssuesMap = new Map<string, LinkedIssue[]>();
   private readonly managedWorkspaces = new Set<string>();
+
+  private async getLinkedBranches(
+    issueNumber: number,
+    repository: Repository,
+  ): Promise<LinkedBranch[]> {
+    const result = await this.octokit.graphql<LinkedBranchesResponse>(
+      settings.queries.linkedBranches,
+      {
+        owner: repository.owner.login,
+        repo: repository.name,
+        issue: issueNumber,
+      },
+    );
+
+    return result.repository.issue.linkedBranches.nodes;
+  }
 
   async getLinkedIssues(
     pr: number,
@@ -57,11 +76,14 @@ export class Orchestrator {
     return workspacePath;
   }
 
-  async spawnWorkerToResolveIssue(issue : any, repository: Repository): Promise<void> {
+  async spawnWorkerToResolveIssue(issue: Issue, repository: Repository): Promise<void> {
     if (issue.assignee?.login !== settings.github.username) {
       return;
     }
-    const repoPath = formatTemplate(
+    const branches = await this.getLinkedBranches(issue.number, repository);
+    if(branches.length != 1) throw new Error('only one branch should be linked to an issue')
+      const branch = branches[0];
+      const repoPath = formatTemplate(
       settings.workspace.issueDirectoryTemplate,
       {
         repositoryPrefix: repository.name.slice(
@@ -75,6 +97,15 @@ export class Orchestrator {
       repoPath,
       repository,
     );
+    if (!branch.ref) 
+      throw new Error(`Linked branch for issue #${issue.number} has no ref`);
+    const git = simpleGit(repoPath);
+    await git.fetch();
+    await git.checkout([
+      "-b", 
+      `farm/i-${issue.number}`,
+      `origin/${branch.ref.name}`,
+    ]);
     const coder = AgentFactory.createCoder(issue.id, workspacePath);
     await coder.solveIssue(issue);
   }
@@ -177,7 +208,7 @@ export class Orchestrator {
     this.releaseReviewer(pullRequest.id);
   }
 
-  async spawnATesterToFindBugs(repository: Repository): Promise<number> {
+  async spawnATesterToFindBugs(repository: Repository) {
     const workflowId = settings.tests.differential.trim();
     if (!workflowId) {
       throw new Error("Set tests.differential in settings.json to the workflow file name or ID");
@@ -194,16 +225,24 @@ export class Orchestrator {
     const workspacePath = await this.setupWorkspace(rootPath, repository, "tester");
     const tester = AgentFactory.createTester(repository.id, workspacePath);
     try {
-      await tester.writeTests();
       const git = simpleGit(workspacePath);
-      let newBranch = (await git.branchLocal()).current;
-      git.push("origin", newBranch, ["--set-upstream"]);
+      const newBranch = `farm/tests-${Date.now()}`;
+      await git.checkoutLocalBranch(newBranch)
+      await tester.writeTests();
+      await git.push("origin", newBranch, ["--set-upstream"]);
       let workflowRun = await tester.runTest(repository, workflowId, newBranch);
       while (workflowRun.conclusion == "success"){
-        await tester.continueWritingTests()
+        await tester.continueWritingTests();
+        await git.push("origin", newBranch, ["--set-upstream"]);
         workflowRun = await tester.runTest(repository, workflowId, newBranch)
       }
-      return await tester.analyzeTestResultsAndCreateIssues(workflowRun);
+      if (workflowRun.conclusion !== "failure") {
+        throw new Error(
+          `Unexpected workflow conclusion: ${workflowRun.conclusion}`,
+        );
+      }
+      await tester.analyzeTestResultsAndCreateIssues(workflowRun);
+      return newBranch;
     } finally {
       await this.releaseTester(repository.id);
     }

@@ -33,6 +33,7 @@ export interface Settings {
     addressReview: string;
   };
   queries: {
+    linkedBranches: string;
     linkedIssues: string;
   };
 }
