@@ -18,14 +18,18 @@
     "reviewerType": "claude",
     "testerType": "codex"
   },
+  "tests": {
+    "differential": "differential.yml",
+    "workflowTimeoutMs": 14400000
+  },
   "prompts": {
     "workOnIssue": "work on issue {issueUrl} and open a PR assigned to me.",
     "reviewPullRequest": "review this pull request {pullRequestUrl}. if you approve, submit approval. if you don't approve, submit changes requested with your feedback. make sure to run the differential test before approving",
-    "reReviewPullRequest": "your review got a response on {pullRequestUrl}. re-review the pull request and submit your feedback. make sure to run the differential test before approving.",
     "addressReview": "you got a review on {pullRequestUrl}",
-    "findBugs": "inspect this repository for reproducible compatibility gapes between this library and microsoft's original directoryServices. verify each finding and create a GitHub issue for the confirmed gaps",
-    "writeTests": "inspect this repository and add focused tests for important untested behavior and likely regressions",
-    "analyzeTestResultsAndCreateIssues": "analyze the completed test workflow at {testResultUrl}, and create a GitHub assigned to me issue for your findings."
+    "reReviewPullRequest": "your review got a response on {pullRequestUrl}. re-review the pull request and submit your feedback. make sure to run the differential test before approving.",
+    "writeTests": "inspect this repository and add focused tests for important untested behavior and likely regressions. commit your tests to a new branch and push. i will send you the test results after you are done",
+    "continueWritingTests": "the tests you wrote passed, keep writing more tests and after you are done i will send you the results again.",
+    "analyzeTestResultsAndCreateIssues": "analyze the completed test workflow at {testResultUrl}. create a GitHub issue assigned to me for your findings, in the issue instruct the coder to work from the same branch you wrote the tests in so it can check against your tests"
   },
   "queries": {
     "linkedIssues": "query($owner: String!, $repo: String!, $pr: Int!, $limit: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $pr) { closingIssuesReferences(first: $limit) { nodes { id number title } } } } }"

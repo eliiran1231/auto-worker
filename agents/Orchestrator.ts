@@ -6,12 +6,11 @@ import { AgentFactory } from "../AgentFactory.js";
 import type { LinkedIssue } from "../interfaces/LinkedIssue.js";
 import type { LinkedIssuesResponse } from "../interfaces/LinkedIssuesResponse.js";
 import type { Repository } from "../interfaces/Repository.js";
-import type { WorkItem } from "../interfaces/WorkItem.js";
 import { settings } from "../settings.js";
 import type { AgentId } from "../types/AgentId.js";
 import type { PullRequest } from "../types/PullRequest.js";
 import { formatTemplate } from "../utils/templates.js";
-import { getGitHubToken, getWorkerEnvironment } from "../utils/github.js";
+import { getGitHubToken, getGitEnvironment } from "../utils/github.js";
 import type { WorkerRole } from "../types/WorkerRole.js";
 
 export class Orchestrator {
@@ -51,7 +50,9 @@ export class Orchestrator {
     role: WorkerRole = "coder",
   ): Promise<string> {
     const workspacePath = path.resolve(clonedRepoPath);
-    await simpleGit().env(getWorkerEnvironment(role)).clone(repository.clone_url, workspacePath);
+    await simpleGit({ unsafe: { allowUnsafeConfigEnvCount: true } })
+      .env(getGitEnvironment(role))
+      .clone(repository.clone_url, workspacePath);
     this.managedWorkspaces.add(workspacePath);
     return workspacePath;
   }
@@ -177,6 +178,10 @@ export class Orchestrator {
   }
 
   async spawnATesterToFindBugs(repository: Repository): Promise<number> {
+    const workflowId = settings.tests.differential.trim();
+    if (!workflowId) {
+      throw new Error("Set tests.differential in settings.json to the workflow file name or ID");
+    }
     const rootPath = formatTemplate(
       settings.workspace.testerDirectoryTemplate,
       {
@@ -188,9 +193,17 @@ export class Orchestrator {
     );
     const workspacePath = await this.setupWorkspace(rootPath, repository, "tester");
     const tester = AgentFactory.createTester(repository.id, workspacePath);
-
     try {
-      return await tester.findBugs();
+      await tester.writeTests();
+      const git = simpleGit(workspacePath);
+      let newBranch = (await git.branchLocal()).current;
+      git.push("origin", newBranch, ["--set-upstream"]);
+      let workflowRun = await tester.runTest(repository, workflowId, newBranch);
+      while (workflowRun.conclusion == "success"){
+        await tester.continueWritingTests()
+        workflowRun = await tester.runTest(repository, workflowId, newBranch)
+      }
+      return await tester.analyzeTestResultsAndCreateIssues(workflowRun);
     } finally {
       await this.releaseTester(repository.id);
     }

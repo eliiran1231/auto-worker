@@ -1,4 +1,5 @@
 import { Octokit } from "octokit";
+import { filter, firstValueFrom, timeout } from "rxjs";
 import { Worker } from "../classes/Worker.js";
 import type { WorkerType } from "../classes/Worker.js";
 import { getGitHubToken } from "../utils/github.js";
@@ -14,17 +15,13 @@ export class Tester extends Worker {
         super(type, root, "tester");
     }
 
-    findBugs(): Promise<number> {
-        return this.spawn(settings.prompts.findBugs);
-    }
-
     private async triggerTestWorkflow(
         repo: Repository,
         workflowId: string,
         branch: string
     ) {
         const octokit = new Octokit({ auth: getGitHubToken("tester") });
-        const owner = settings.github.username;
+        const owner = repo.owner.login;
         const ref = branch;
 
         const response = await octokit.request(
@@ -41,19 +38,20 @@ export class Tester extends Worker {
             },
         );
 
-        return response.data.workflow_run_id;
+        const workflowRunId = Number(response.data.workflow_run_id);
+        if (!Number.isSafeInteger(workflowRunId) || workflowRunId <= 0) {
+            throw new Error("Workflow dispatch did not return a valid workflow run ID");
+        }
+        return workflowRunId;
     }
 
     private async waitForWorkflowCompletion(repo: Repository, workflowRunId: number) {
-        return new Promise<WorkflowRun>((resolve) => {
-            const subscription = WorkflowManager.getWorkflowRunCompletedReplaySubject(repo)
-            .subscribe((workflowRun) => {
-                if (workflowRun.id === workflowRunId) {
-                    subscription.unsubscribe();
-                    resolve(workflowRun);
-                }
-            });
-        });
+        return firstValueFrom(
+            WorkflowManager.getWorkflowRunCompletedReplaySubject(repo).pipe(
+                filter((workflowRun) => workflowRun.id === workflowRunId),
+                timeout({ first: settings.tests.workflowTimeoutMs }),
+            ),
+        );
     }
 
     async runTest(
@@ -62,19 +60,22 @@ export class Tester extends Worker {
         branch: string
     ) {
         const workflow_run_id = await this.triggerTestWorkflow(repo, workflowId, branch);
-        const workflowRun = await this.waitForWorkflowCompletion(repo, Number(workflow_run_id));
+        const workflowRun = await this.waitForWorkflowCompletion(repo, workflow_run_id);
         return workflowRun;
     }
 
     analyzeTestResultsAndCreateIssues(testResult: WorkflowRun): Promise<number> {
         return this.send(
             formatTemplate(settings.prompts.analyzeTestResultsAndCreateIssues, {
-                testResultUrl: testResult.html_url,
+                testResultUrl: testResult.url,
             }),
         );
     }
 
     writeTests(): Promise<number> {
         return this.spawn(settings.prompts.writeTests);
+    }
+    continueWritingTests() {
+      return this.send(settings.prompts.continueWritingTests);
     }
 }

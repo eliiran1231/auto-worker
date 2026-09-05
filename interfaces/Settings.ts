@@ -19,14 +19,18 @@ export interface Settings {
     reviewerType: WorkerType;
     testerType: WorkerType;
   };
+  tests: {
+    differential: string;
+    workflowTimeoutMs: number;
+  };
   prompts: {
+    continueWritingTests: string;
     writeTests: string;
     analyzeTestResultsAndCreateIssues: string;
     reReviewPullRequest: string;
     workOnIssue: string;
     reviewPullRequest: string;
     addressReview: string;
-    findBugs: string;
   };
   queries: {
     linkedIssues: string;

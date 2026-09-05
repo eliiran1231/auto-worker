@@ -31,3 +31,12 @@ export function getWorkerEnvironment(role: WorkerRole): Record<string, string> {
   env.GIT_CONFIG_COUNT = String(count + 2);
   return env;
 }
+
+export function getGitEnvironment(role: WorkerRole): Record<string, string> {
+  const env = getWorkerEnvironment(role);
+  // These Git operations use explicit arguments and never need an editor or pager.
+  for (const key of Object.keys(env)) {
+    if (/^(EDITOR|VISUAL|GIT_EDITOR|GIT_SEQUENCE_EDITOR|PAGER|GIT_PAGER)$/i.test(key)) delete env[key];
+  }
+  return env;
+}
