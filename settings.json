@@ -5,13 +5,15 @@
   },
   "github": {
     "username": "eliiran1231",
-    "linkedIssuesLimit": 10
+    "linkedIssuesLimit": 10,
+    "linkedBranchAttempts": 6,
+    "linkedBranchRetryMs": 2000
   },
   "workspace": {
     "defaultRoot": "c:/",
     "repositoryPrefixLength": 3,
     "issueDirectoryTemplate": "./{repositoryPrefix}-i-{issueNumber}",
-    "testerDirectoryTemplate": "./{repositoryPrefix}-tests"
+    "testerDirectoryTemplate": "./{repositoryPrefix}-{repositoryId}-tests"
   },
   "agents": {
     "coderType": "codex",
@@ -20,7 +22,9 @@
   },
   "tests": {
     "differential": "differential.yml",
-    "workflowTimeoutMs": 14400000
+    "workflowTimeoutMs": 14400000,
+    "completionReplayLimit": 100,
+    "completionReplayMs": 300000
   },
   "prompts": {
     "workOnIssue": "work on issue {issueUrl} and open a PR assigned to me.",
@@ -29,7 +33,7 @@
     "reReviewPullRequest": "your review got a response on {pullRequestUrl}. re-review the pull request and submit your feedback. make sure to run the differential test before approving.",
     "writeTests": "inspect this repository and add focused tests for important untested behavior and likely regressions. commit your tests too. i will send you the test results after you are done",
     "continueWritingTests": "the tests you wrote passed, keep writing more tests and commit, after you are done i will send you the results again.",
-    "analyzeTestResultsAndCreateIssues": "analyze the completed test workflow at {testResultUrl}. create a GitHub issue assigned to me for your findings, in the issue link the same branch you wrote the tests in, in the development section so the coder can check out your tests"
+    "analyzeTestResultsAndCreateIssues": "Analyze the completed test workflow at {testResultUrl}. For each confirmed finding, first create an unassigned GitHub issue. Then link the same branch you wrote the tests in through the issue's Development section and verify that exactly one branch is linked. Only after the Development link is visible, assign the issue to {assignee} so the coder can branch from your tests. If linking fails, leave the issue unassigned and report the error."
   },
   "queries": {
     "linkedBranches": "query($owner: String!, $repo: String!, $issue: Int!) { repository(owner: $owner, name: $repo) { issue(number: $issue) { linkedBranches(first: 10) { nodes { ref { name } } } } } }",

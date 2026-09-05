@@ -68,16 +68,21 @@ test("tests are pushed before dispatch, analysis resumes the worker, and cleanup
     const turns = [];
     t.mock.method(tester, "runCodexTurn", async (prompt) => {
       turns.push(prompt);
-      if (turns.length === 1) await writeFile(path.join(root, "regression.test.txt"), "regression\n");
+      if (prompt === settings.prompts.writeTests || prompt === settings.prompts.continueWritingTests) {
+        assert.match(git("branch", "--show-current"), /^farm\/tests-/);
+        await writeFile(path.join(root, "regression.test.txt"), "regression\n" + turns.length);
+        git("add", ".");
+        git("commit", "-m", "tests " + turns.length);
+      }
       return 0;
     });
     t.mock.method(tester, "runTest", async (actualRepo, workflowId, branch) => {
       assert.equal(actualRepo, repo);
       assert.equal(workflowId, "differential.yml");
-      assert.equal(branch, "farm/i-{lastIssueNumber+1}");
-      assert.equal(git("--git-dir", remote, "show", `${branch}:regression.test.txt`), "regression");
+      assert.match(branch, /^farm\/tests-\d+$/);
+      assert.equal(git("--git-dir", remote, "show", `${branch}:regression.test.txt`), "regression\n" + turns.length);
       assert.equal(tester.initialized, true);
-      return { id: 45, url: "https://api.github.com/run/45" };
+      return { id: 45, url: "https://api.github.com/run/45", conclusion: turns.length === 1 ? "success" : "failure" };
     });
     const orchestrator = new Orchestrator();
     t.mock.method(orchestrator, "setupWorkspace", async () => root);
@@ -86,11 +91,12 @@ test("tests are pushed before dispatch, analysis resumes the worker, and cleanup
       assert.equal(id, repo.id);
       tester.kill();
     });
-    assert.equal(await orchestrator.spawnATesterToFindBugs(repo), 0);
-    assert.equal(turns.length, 2);
-    assert.match(turns[1], /https:\/\/api.github.com\/run\/45/);
+    assert.match(await orchestrator.spawnATesterToFindBugs(repo), /^farm\/tests-/);
+    assert.equal(turns.length, 3);
+    assert.match(turns[2], /https:\/\/api.github.com\/run\/45/);
     assert.equal(release.mock.callCount(), 1);
-    // The unchanged branch already exists: preparation fails and still cleans up.
+    // Unexpected workflow conclusions fail and still clean up.
+    t.mock.method(tester, "runTest", async () => ({ conclusion: "cancelled" }));
     await assert.rejects(orchestrator.spawnATesterToFindBugs(repo));
     assert.equal(release.mock.callCount(), 2);
   } finally {

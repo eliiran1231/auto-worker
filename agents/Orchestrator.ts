@@ -1,7 +1,7 @@
 import { rm } from "node:fs/promises";
 import path from "node:path";
 import { Octokit } from "octokit";
-import { simpleGit } from "simple-git";
+import { setTimeout as delay } from "node:timers/promises";
 import { AgentFactory } from "../AgentFactory.js";
 import type { LinkedIssue } from "../interfaces/LinkedIssue.js";
 import type { LinkedBranch } from "../interfaces/LinkedBranch.js";
@@ -13,7 +13,9 @@ import { settings } from "../settings.js";
 import type { AgentId } from "../types/AgentId.js";
 import type { PullRequest } from "../types/PullRequest.js";
 import { formatTemplate } from "../utils/templates.js";
-import { getGitHubToken, getGitEnvironment } from "../utils/github.js";
+import { getGitHubToken } from "../utils/github.js";
+import { createRoleGit } from "../utils/git.js";
+import type { TesterScanState } from "../interfaces/TesterScanState.js";
 import type { WorkerRole } from "../types/WorkerRole.js";
 
 export class Orchestrator {
@@ -22,6 +24,18 @@ export class Orchestrator {
   });
   private readonly linkedIssuesMap = new Map<string, LinkedIssue[]>();
   private readonly managedWorkspaces = new Set<string>();
+  private readonly testerScans = new Map<number, TesterScanState>();
+
+  private async waitForLinkedBranch(issue: Issue, repository: Repository): Promise<string> {
+    const { linkedBranchAttempts, linkedBranchRetryMs } = settings.github;
+    for (let attempt = 0; attempt < linkedBranchAttempts; attempt++) {
+      const branches = await this.getLinkedBranches(issue.number, repository);
+      if (branches.length === 1 && branches[0].ref) return branches[0].ref.name;
+      if (branches.length > 1) break;
+      if (attempt + 1 < linkedBranchAttempts) await delay(linkedBranchRetryMs);
+    }
+    throw new Error(`Expected exactly one linked branch with a non-null ref for issue #${issue.number}`);
+  }
 
   private async getLinkedBranches(
     issueNumber: number,
@@ -69,8 +83,7 @@ export class Orchestrator {
     role: WorkerRole = "coder",
   ): Promise<string> {
     const workspacePath = path.resolve(clonedRepoPath);
-    await simpleGit({ unsafe: { allowUnsafeConfigEnvCount: true } })
-      .env(getGitEnvironment(role))
+    await createRoleGit(process.cwd(), role)
       .clone(repository.clone_url, workspacePath);
     this.managedWorkspaces.add(workspacePath);
     return workspacePath;
@@ -80,10 +93,8 @@ export class Orchestrator {
     if (issue.assignee?.login !== settings.github.username) {
       return;
     }
-    const branches = await this.getLinkedBranches(issue.number, repository);
-    if(branches.length != 1) throw new Error('only one branch should be linked to an issue')
-      const branch = branches[0];
-      const repoPath = formatTemplate(
+    const branch = await this.waitForLinkedBranch(issue, repository);
+    const repoPath = formatTemplate(
       settings.workspace.issueDirectoryTemplate,
       {
         repositoryPrefix: repository.name.slice(
@@ -97,14 +108,12 @@ export class Orchestrator {
       repoPath,
       repository,
     );
-    if (!branch.ref) 
-      throw new Error(`Linked branch for issue #${issue.number} has no ref`);
-    const git = simpleGit(repoPath);
+    const git = createRoleGit(workspacePath, "coder");
     await git.fetch();
     await git.checkout([
       "-b", 
       `farm/i-${issue.number}`,
-      `origin/${branch.ref.name}`,
+      `origin/${branch}`,
     ]);
     const coder = AgentFactory.createCoder(issue.id, workspacePath);
     await coder.solveIssue(issue);
@@ -208,7 +217,37 @@ export class Orchestrator {
     this.releaseReviewer(pullRequest.id);
   }
 
-  async spawnATesterToFindBugs(repository: Repository) {
+  spawnATesterToFindBugs(repository: Repository): Promise<string> {
+    const active = this.testerScans.get(repository.id);
+    if (active) {
+      active.repository = repository;
+      active.pending = true;
+      return active.promise;
+    }
+    const state: TesterScanState = { repository, pending: false, promise: Promise.resolve("") };
+    this.testerScans.set(repository.id, state);
+    state.promise = Promise.resolve().then(async () => {
+      let branch = "";
+      const errors: unknown[] = [];
+      try {
+        do {
+          state.pending = false;
+          try {
+            branch = await this.runTesterScan(state.repository);
+          } catch (error) {
+            errors.push(error);
+          }
+        } while (state.pending);
+        if (errors.length) throw new AggregateError(errors, `Tester scan failed for repository ${repository.id}`);
+        return branch;
+      } finally {
+        this.testerScans.delete(repository.id);
+      }
+    });
+    return state.promise;
+  }
+
+  private async runTesterScan(repository: Repository): Promise<string> {
     const workflowId = settings.tests.differential.trim();
     if (!workflowId) {
       throw new Error("Set tests.differential in settings.json to the workflow file name or ID");
@@ -216,6 +255,7 @@ export class Orchestrator {
     const rootPath = formatTemplate(
       settings.workspace.testerDirectoryTemplate,
       {
+        repositoryId: repository.id,
         repositoryPrefix: repository.name.substring(
           0,
           settings.workspace.repositoryPrefixLength,
@@ -225,7 +265,7 @@ export class Orchestrator {
     const workspacePath = await this.setupWorkspace(rootPath, repository, "tester");
     const tester = AgentFactory.createTester(repository.id, workspacePath);
     try {
-      const git = simpleGit(workspacePath);
+      const git = createRoleGit(workspacePath, "tester");
       const newBranch = `farm/tests-${Date.now()}`;
       await git.checkoutLocalBranch(newBranch)
       await tester.writeTests();

@@ -7,6 +7,8 @@ export interface Settings {
   github: {
     username: string;
     linkedIssuesLimit: number;
+    linkedBranchAttempts: number;
+    linkedBranchRetryMs: number;
   };
   workspace: {
     defaultRoot: string;
@@ -22,6 +24,8 @@ export interface Settings {
   tests: {
     differential: string;
     workflowTimeoutMs: number;
+    completionReplayLimit: number;
+    completionReplayMs: number;
   };
   prompts: {
     continueWritingTests: string;

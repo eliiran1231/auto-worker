@@ -1,6 +1,7 @@
 import { ReplaySubject } from "rxjs";
 import type { WorkflowRun } from "../types/WorkflowRun.js";
 import type { Repository } from "../interfaces/Repository.js";
+import { settings } from "../settings.js";
 
 export class WorkflowManager {
     private static onWorkflowRunCompleted: Record<string, ReplaySubject<WorkflowRun> | undefined> = {};
@@ -9,7 +10,10 @@ export class WorkflowManager {
         if (run) run.next(workflowRun);
     }
     static getWorkflowRunCompletedReplaySubject(repo: Repository): ReplaySubject<WorkflowRun> {
-        this.onWorkflowRunCompleted[repo.id] ??= new ReplaySubject<WorkflowRun>();
+        this.onWorkflowRunCompleted[repo.id] ??= new ReplaySubject<WorkflowRun>(
+            settings.tests.completionReplayLimit,
+            settings.tests.completionReplayMs,
+        );
         return this.onWorkflowRunCompleted[repo.id]!;
     }
 }

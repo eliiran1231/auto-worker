@@ -68,6 +68,7 @@ export class Tester extends Worker {
         return this.send(
             formatTemplate(settings.prompts.analyzeTestResultsAndCreateIssues, {
                 testResultUrl: testResult.url,
+                assignee: settings.github.username,
             }),
         );
     }
