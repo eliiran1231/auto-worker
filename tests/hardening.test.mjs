@@ -61,25 +61,6 @@ test("PR close cleans up before scheduling its scan in the background", async ()
   assert.deepEqual(calls, ["cleanup", "scan"]);
 });
 
-test("linked branch lookup retries empty and null refs, using the issue number", async (t) => {
-  const worker = orchestrator(t);
-  const previous = settings.github.linkedBranchRetryMs;
-  settings.github.linkedBranchRetryMs = 1;
-  t.after(() => { settings.github.linkedBranchRetryMs = previous; });
-  const responses = [[], [{ ref: null }], [{ ref: { name: "tester/branch" } }]];
-  const lookup = t.mock.method(worker, "getLinkedBranches", async (number) => {
-    assert.equal(number, 17);
-    return responses.shift();
-  });
-  assert.equal(await worker.waitForLinkedBranch({ id: 987, number: 17 }, repo(1)), "tester/branch");
-  assert.equal(lookup.mock.callCount(), 3);
-  t.mock.method(worker, "getLinkedBranches", async () => []);
-  await assert.rejects(worker.waitForLinkedBranch({ number: 17 }, repo(1)), /exactly one linked branch/);
-  const multiple = t.mock.method(worker, "getLinkedBranches", async () => [{ ref: { name: "a" } }, { ref: { name: "b" } }]);
-  await assert.rejects(worker.waitForLinkedBranch({ number: 17 }, repo(1)), /exactly one linked branch/);
-  assert.equal(multiple.mock.callCount(), 1);
-});
-
 test("role Git instances pass isolated credentials to subsequent Git commands", async (t) => {
   const before = { ...process.env };
   t.after(() => { process.env = before; });

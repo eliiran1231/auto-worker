@@ -7,8 +7,6 @@ export interface Settings {
   github: {
     username: string;
     linkedIssuesLimit: number;
-    linkedBranchAttempts: number;
-    linkedBranchRetryMs: number;
   };
   workspace: {
     defaultRoot: string;
@@ -37,7 +35,6 @@ export interface Settings {
     addressReview: string;
   };
   queries: {
-    linkedBranches: string;
     linkedIssues: string;
   };
 }

@@ -1,11 +1,8 @@
 import { rm } from "node:fs/promises";
 import path from "node:path";
 import { Octokit } from "octokit";
-import { setTimeout as delay } from "node:timers/promises";
 import { AgentFactory } from "../AgentFactory.js";
 import type { LinkedIssue } from "../interfaces/LinkedIssue.js";
-import type { LinkedBranch } from "../interfaces/LinkedBranch.js";
-import type { LinkedBranchesResponse } from "../interfaces/LinkedBranchesResponse.js";
 import type { Issue } from "../types/Issue.js";
 import type { LinkedIssuesResponse } from "../interfaces/LinkedIssuesResponse.js";
 import type { Repository } from "../interfaces/Repository.js";
@@ -25,33 +22,6 @@ export class Orchestrator {
   private readonly linkedIssuesMap = new Map<string, LinkedIssue[]>();
   private readonly managedWorkspaces = new Set<string>();
   private readonly testerScans = new Map<number, TesterScanState>();
-
-  private async waitForLinkedBranch(issue: Issue, repository: Repository): Promise<string> {
-    const { linkedBranchAttempts, linkedBranchRetryMs } = settings.github;
-    for (let attempt = 0; attempt < linkedBranchAttempts; attempt++) {
-      const branches = await this.getLinkedBranches(issue.number, repository);
-      if (branches.length === 1 && branches[0].ref) return branches[0].ref.name;
-      if (branches.length > 1) break;
-      if (attempt + 1 < linkedBranchAttempts) await delay(linkedBranchRetryMs);
-    }
-    throw new Error(`Expected exactly one linked branch with a non-null ref for issue #${issue.number}`);
-  }
-
-  private async getLinkedBranches(
-    issueNumber: number,
-    repository: Repository,
-  ): Promise<LinkedBranch[]> {
-    const result = await this.octokit.graphql<LinkedBranchesResponse>(
-      settings.queries.linkedBranches,
-      {
-        owner: repository.owner.login,
-        repo: repository.name,
-        issue: issueNumber,
-      },
-    );
-
-    return result.repository.issue.linkedBranches.nodes;
-  }
 
   async getLinkedIssues(
     pr: number,
@@ -93,7 +63,6 @@ export class Orchestrator {
     if (issue.assignee?.login !== settings.github.username) {
       return;
     }
-    const branch = await this.waitForLinkedBranch(issue, repository);
     const repoPath = formatTemplate(
       settings.workspace.issueDirectoryTemplate,
       {
@@ -113,7 +82,7 @@ export class Orchestrator {
     await git.checkout([
       "-b", 
       `farm/i-${issue.number}`,
-      `origin/${branch}`,
+      "origin/dev",
     ]);
     const coder = AgentFactory.createCoder(issue.id, workspacePath);
     await coder.solveIssue(issue);
@@ -267,7 +236,8 @@ export class Orchestrator {
     try {
       const git = createRoleGit(workspacePath, "tester");
       const newBranch = `farm/tests-${Date.now()}`;
-      await git.checkoutLocalBranch(newBranch)
+      await git.fetch("origin", "dev");
+      await git.checkout(["-b", newBranch, "origin/dev"]);
       await tester.writeTests();
       await git.push("origin", newBranch, ["--set-upstream"]);
       let workflowRun = await tester.runTest(repository, workflowId, newBranch);
@@ -281,6 +251,10 @@ export class Orchestrator {
           `Unexpected workflow conclusion: ${workflowRun.conclusion}`,
         );
       }
+      await git.fetch("origin", "dev");
+      await git.checkout(["-B", "dev", "origin/dev"]);
+      await git.merge(["--no-ff", newBranch]);
+      await git.push("origin", "dev");
       await tester.analyzeTestResultsAndCreateIssues(workflowRun);
       return newBranch;
     } finally {

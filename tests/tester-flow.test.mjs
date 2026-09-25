@@ -63,6 +63,8 @@ test("tests are pushed before dispatch, analysis resumes the worker, and cleanup
     git("commit", "--allow-empty", "-m", "initial");
     git("init", "--bare", remote);
     git("remote", "add", "origin", remote);
+    git("branch", "-M", "dev");
+    git("push", "origin", "dev");
     const repo = repository(105);
     const tester = new Tester("codex", root);
     const turns = [];
@@ -73,6 +75,8 @@ test("tests are pushed before dispatch, analysis resumes the worker, and cleanup
         await writeFile(path.join(root, "regression.test.txt"), "regression\n" + turns.length);
         git("add", ".");
         git("commit", "-m", "tests " + turns.length);
+      } else {
+        assert.equal(git("--git-dir", remote, "show", "dev:regression.test.txt"), "regression\n2");
       }
       return 0;
     });
@@ -94,6 +98,7 @@ test("tests are pushed before dispatch, analysis resumes the worker, and cleanup
     assert.match(await orchestrator.spawnATesterToFindBugs(repo), /^farm\/tests-/);
     assert.equal(turns.length, 3);
     assert.match(turns[2], /https:\/\/api.github.com\/run\/45/);
+    assert.equal(git("--git-dir", remote, "show", "dev:regression.test.txt"), "regression\n2");
     assert.equal(release.mock.callCount(), 1);
     // Unexpected workflow conclusions fail and still clean up.
     t.mock.method(tester, "runTest", async () => ({ conclusion: "cancelled" }));
