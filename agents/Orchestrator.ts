@@ -14,6 +14,8 @@ import { getGitHubToken } from "../utils/github.js";
 import { createRoleGit } from "../utils/git.js";
 import type { TesterScanState } from "../interfaces/TesterScanState.js";
 import type { WorkerRole } from "../types/WorkerRole.js";
+import { WorkerStore, type SavedScan } from "../classes/WorkerStore.js";
+import { logger } from "../utils/logger.js";
 
 export class Orchestrator {
   private readonly octokit = new Octokit({
@@ -22,6 +24,24 @@ export class Orchestrator {
   private readonly linkedIssuesMap = new Map<string, LinkedIssue[]>();
   private readonly managedWorkspaces = new Set<string>();
   private readonly testerScans = new Map<number, TesterScanState>();
+
+  constructor(private readonly store?: WorkerStore) {
+    for (const worker of [...Object.values(AgentFactory.coders), ...Object.values(AgentFactory.testers)]) {
+      if (!worker.root) continue;
+      const root = path.resolve(worker.root);
+      const relative = path.relative(path.resolve(process.cwd()), root);
+      if (relative && relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)) {
+        this.managedWorkspaces.add(root);
+      }
+    }
+  }
+
+  recoverTesterScans(): void {
+    for (const scan of this.store?.loadScans() ?? []) {
+      void this.spawnATesterToFindBugs(scan.repository).catch(error =>
+        logger.error("Recovered tester scan failed", { repositoryId: scan.repository.id, error }));
+    }
+  }
 
   async getLinkedIssues(
     pr: number,
@@ -63,6 +83,7 @@ export class Orchestrator {
     if (issue.assignee?.login !== settings.github.username) {
       return;
     }
+    if (AgentFactory.getCoder(issue.id)) return;
     const repoPath = formatTemplate(
       settings.workspace.issueDirectoryTemplate,
       {
@@ -95,6 +116,8 @@ export class Orchestrator {
     ) {
       return;
     }
+
+    if (AgentFactory.getReviewer(pullRequest.id)) return;
 
     const reviewer = AgentFactory.createReviewer(pullRequest.id);
     await reviewer.reviewPullRequest(pullRequest);
@@ -231,34 +254,60 @@ export class Orchestrator {
         ),
       },
     );
-    const workspacePath = await this.setupWorkspace(rootPath, repository, "tester");
-    const tester = AgentFactory.createTester(repository.id, workspacePath);
+    let scan = this.store?.loadScans().find(saved => saved.repository.id === repository.id);
+    const restoredTester = scan ? AgentFactory.getTester(repository.id) : undefined;
+    const workspacePath = scan
+      ? path.resolve(restoredTester?.root ?? rootPath)
+      : await this.setupWorkspace(rootPath, repository, "tester");
+    const tester = scan
+      ? restoredTester ?? AgentFactory.createTester(repository.id, workspacePath)
+      : AgentFactory.createTester(repository.id, workspacePath);
     try {
       const git = createRoleGit(workspacePath, "tester");
-      const newBranch = `farm/tests-${Date.now()}`;
-      await git.fetch("origin", "dev");
-      await git.checkout(["-b", newBranch, "origin/dev"]);
-      await tester.writeTests();
-      await git.push("origin", newBranch, ["--set-upstream"]);
-      let workflowRun = await tester.runTest(repository, workflowId, newBranch);
-      while (workflowRun.conclusion == "success"){
-        await tester.continueWritingTests();
+      if (!scan) {
+        const branch = `farm/tests-${Date.now()}`;
+        await git.fetch("origin", "dev");
+        await git.checkout(["-b", branch, "origin/dev"]);
+        scan = { repository, branch, phase: "writing" };
+        this.store?.saveScan(scan);
+      }
+      const newBranch = scan.branch;
+      if (scan.phase === "writing") {
+        const resumed = await tester.resumePendingTurns();
+        if (resumed.length === 0) await tester.writeTests();
+        scan.phase = "testing";
+        this.store?.saveScan(scan);
+      } else if (scan.phase === "testing") {
+        await tester.resumePendingTurns();
+      }
+      if (scan.phase === "testing") {
         await git.push("origin", newBranch, ["--set-upstream"]);
-        workflowRun = await tester.runTest(repository, workflowId, newBranch)
+        let workflowRun = await tester.runTest(repository, workflowId, newBranch);
+        while (workflowRun.conclusion === "success") {
+          await tester.continueWritingTests();
+          await git.push("origin", newBranch, ["--set-upstream"]);
+          workflowRun = await tester.runTest(repository, workflowId, newBranch);
+        }
+        if (workflowRun.conclusion !== "failure") {
+          throw new Error(`Unexpected workflow conclusion: ${workflowRun.conclusion}`);
+        }
+        scan.workflowRun = workflowRun;
+        scan.phase = "analyzing";
+        this.store?.saveScan(scan);
       }
-      if (workflowRun.conclusion !== "failure") {
-        throw new Error(
-          `Unexpected workflow conclusion: ${workflowRun.conclusion}`,
-        );
-      }
+      if (!scan.workflowRun) throw new Error("Missing completed tester workflow run");
       await git.fetch("origin", "dev");
       await git.checkout(["-B", "dev", "origin/dev"]);
       await git.merge(["--no-ff", newBranch]);
       await git.push("origin", "dev");
-      await tester.analyzeTestResultsAndCreateIssues(workflowRun);
+      const resumedAnalysis = await tester.resumePendingTurns();
+      if (resumedAnalysis.length === 0) await tester.analyzeTestResultsAndCreateIssues(scan.workflowRun);
+      this.store?.deleteScan(repository.id);
       return newBranch;
     } finally {
-      await this.releaseTester(repository.id);
+      if (!this.store?.loadScans().some(saved => saved.repository.id === repository.id)) {
+        await this.releaseTester(repository.id);
+      }
     }
   }
 

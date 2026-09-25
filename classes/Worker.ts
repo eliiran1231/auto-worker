@@ -8,12 +8,13 @@ import type { WorkerRole } from "../types/WorkerRole.js";
 import { getWorkerEnvironment } from "../utils/github.js";
 import { randomUUID } from "node:crypto";
 import { logger, withLogContext } from "../utils/logger.js";
+import type { SavedWorker, WorkerStore } from "./WorkerStore.js";
 
 export type WorkerType = "codex" | "claude";
 export type WorkerStatus = "idle" | "working" | "error";
 
 export class Worker {
-  readonly workerId = randomUUID();
+  workerId: string = randomUUID();
   initialized = false;
   readonly type: WorkerType;
   status: WorkerStatus = "idle";
@@ -29,10 +30,45 @@ export class Worker {
   private stopped = false;
   private generation = 0;
   private pendingTurns = 0;
+  private pendingPrompts: string[] = [];
+  private persistence?: { store: WorkerStore; agentId: string };
 
   constructor(type: WorkerType, root: string | undefined, readonly role: WorkerRole) {
     this.type = type;
     this.root = root;
+  }
+
+  attachStore(store: WorkerStore, agentId: string): void {
+    this.persistence = { store, agentId };
+    this.persist();
+  }
+
+  restore(saved: SavedWorker, store: WorkerStore): void {
+    this.workerId = saved.workerId;
+    this.root = saved.root ?? undefined;
+    this.conversationId = saved.conversationId ?? undefined;
+    this.initialized = saved.initialized;
+    this.status = saved.status;
+    this.persistence = { store, agentId: saved.agentId };
+    this.pendingPrompts = [...saved.pending];
+  }
+
+  resumePendingTurns(): Promise<number[]> {
+    const prompts = [...this.pendingPrompts];
+    this.pendingPrompts = [];
+    if (!prompts.length) return Promise.resolve([]);
+    if (!this.initialized) this.initialized = true;
+    return Promise.all(prompts.map(prompt => this.enqueueTurn(prompt, this.generation)));
+  }
+
+  private persist(): void {
+    if (!this.persistence) return;
+    this.persistence.store.save({
+      role: this.role, agentId: this.persistence.agentId, workerId: this.workerId,
+      type: this.type, root: this.root ?? null, initialized: this.initialized,
+      status: this.status, conversationId: this.conversationId ?? null,
+      pending: this.pendingPrompts,
+    });
   }
 
   spawn(prompt: string, repoPath = this.root): Promise<number> {
@@ -47,6 +83,7 @@ export class Worker {
     this.stopped = false;
     this.generation += 1;
     this.pendingTurns = 0;
+    this.persist();
 
     return this.enqueueTurn(prompt, this.generation);
   }
@@ -72,13 +109,17 @@ export class Worker {
     this.generation += 1;
     this.pendingTurns = 0;
     this.status = "idle";
+    this.pendingPrompts = [];
+    this.persist();
   }
 
   private enqueueTurn(prompt: string, generation: number): Promise<number> {
     const queuedAt = Date.now();
     const fields = { workerId: this.workerId, role: this.role, engine: this.type, workspace: this.root };
     this.pendingTurns += 1;
+    this.pendingPrompts.push(prompt);
     this.status = "working";
+    this.persist();
     this.say(`PROMPT (queued): ${prompt}`);
 
     const turn = this.turnQueue.then(async () => {
@@ -94,13 +135,17 @@ export class Worker {
 
     const trackedTurn = turn.then(
       (result) => {
+        if (generation === this.generation) this.pendingPrompts.shift();
         this.finishTurn(generation, false);
+        this.persist();
         this.say(this.status === "working" ? "✓ Turn finished; more work queued" : "✓ Idle — turn finished");
 
         return result;
       },
       (error: unknown) => {
+        if (generation === this.generation) this.pendingPrompts.shift();
         this.finishTurn(generation, true);
+        this.persist();
         this.say("✗ Turn failed (see error below)");
         logger.error("Agent turn failed", { ...fields, durationMs: Date.now() - queuedAt, error });
         throw error;
@@ -138,11 +183,14 @@ export class Worker {
     generation: number,
   ): Promise<number> {
     this.codex ??= new Codex({ env: getWorkerEnvironment(this.role) });
-    this.codexThread ??= this.codex.startThread({
+    const threadOptions = {
       ...(this.root ? { workingDirectory: this.root } : {}),
       sandboxMode: "danger-full-access",
       approvalPolicy: "never"
-    });
+    } as const;
+    this.codexThread ??= this.conversationId
+      ? this.codex.resumeThread(this.conversationId, threadOptions)
+      : this.codex.startThread(threadOptions);
     const codexThread = this.codexThread;
 
     const abortController = new AbortController();
@@ -155,7 +203,10 @@ export class Worker {
       let completed = false;
       for await (const event of events) {
         if (generation !== this.generation) throw new Error("Worker has been stopped");
-        if (event.type === "thread.started") this.conversationId = event.thread_id;
+        if (event.type === "thread.started") {
+          this.conversationId = event.thread_id;
+          this.persist();
+        }
         if (event.type === "item.completed" && event.item.type === "agent_message") {
           this.say(event.item.text);
         }
@@ -175,6 +226,7 @@ export class Worker {
       }
 
       this.conversationId = codexThread.id ?? undefined;
+      this.persist();
       return 0;
     } finally {
       if (this.abortController === abortController) {
@@ -215,6 +267,7 @@ export class Worker {
           message.session_id
         ) {
           this.conversationId = message.session_id;
+          this.persist();
         }
 
         if (message.type === "result") {
