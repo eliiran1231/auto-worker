@@ -17,7 +17,7 @@
   },
   "agents": {
     "coderType": "codex",
-    "reviewerType": "claude",
+    "reviewerType": "codex",
     "testerType": "codex"
   },
   "tests": {

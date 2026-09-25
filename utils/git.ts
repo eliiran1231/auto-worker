@@ -5,6 +5,9 @@ import { getGitEnvironment } from "./github.js";
 export function createRoleGit(workspace: string, role: WorkerRole) {
   return simpleGit({
     baseDir: workspace,
-    unsafe: { allowUnsafeConfigEnvCount: true },
+    unsafe: { 
+      allowUnsafeConfigEnvCount: true,
+      allowUnsafeAskPass: true,
+    },
   }).env(getGitEnvironment(role));
 }

@@ -4,6 +4,7 @@ import type { Orchestrator } from "../agents/Orchestrator.js";
 import { settings } from "../settings.js";
 import { AgentFactory } from "../AgentFactory.js";
 import { WorkflowManager } from "../classes/workflowManager.js";
+import { logger, withLogContext } from "./logger.js";
 
 export function registerWebhooks(webhooks: Webhooks, orchestrator: Orchestrator): void {
   function onBackground<E extends EmitterWebhookEventName>(
@@ -11,8 +12,12 @@ export function registerWebhooks(webhooks: Webhooks, orchestrator: Orchestrator)
     work: (event: EmitterWebhookEvent<E>) => unknown,
   ): void {
     webhooks.on(name, (event) => {
-      void Promise.resolve().then(() => work(event as EmitterWebhookEvent<E>)).catch((error: unknown) => {
-        console.error(`Webhook ${name} (${event.id}) failed`, error);
+      withLogContext({ event: name, deliveryId: event.id }, () => {
+        const started = Date.now();
+
+        void Promise.resolve().then(() => work(event as EmitterWebhookEvent<E>)).catch((error: unknown) => {
+          logger.error("Webhook background work failed", { durationMs: Date.now() - started, error });
+        });
       });
     });
   }
@@ -28,6 +33,7 @@ export function registerWebhooks(webhooks: Webhooks, orchestrator: Orchestrator)
     switch (payload.review.state.toLowerCase()) {
       case "approved":
         if (pullRequest.draft) {
+
           return;
         }
         await orchestrator.mergePullRequest(pullRequest);
@@ -35,6 +41,7 @@ export function registerWebhooks(webhooks: Webhooks, orchestrator: Orchestrator)
 
       case "changes_requested":
         if (pullRequest.draft) {
+
           return;
         }
         await orchestrator.tellAssignedWorkerToAddressReview(pullRequest);
@@ -48,6 +55,7 @@ export function registerWebhooks(webhooks: Webhooks, orchestrator: Orchestrator)
       || pullRequest.draft
       || pullRequest.state.toLowerCase() !== "open"
     ) {
+
       return;
     }
     const reviewer = AgentFactory.getReviewer(payload.pull_request.id);
@@ -66,6 +74,7 @@ export function registerWebhooks(webhooks: Webhooks, orchestrator: Orchestrator)
 
   webhooks.on("workflow_run.completed", ({ payload }) => {
     const workflowRun = payload.workflow_run;
+
     WorkflowManager.notifyWorkflowRunCompleted(payload.repository, workflowRun);
   });
 

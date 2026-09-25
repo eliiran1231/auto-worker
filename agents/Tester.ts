@@ -8,6 +8,7 @@ import type { Repository } from "../interfaces/Repository.js";
 import type { WorkflowRun } from "../types/WorkflowRun.js";
 import { WorkflowManager } from "../classes/workflowManager.js";
 import { formatTemplate } from "../utils/templates.js";
+import { logger } from "../utils/logger.js";
 
 
 export class Tester extends Worker {
@@ -20,6 +21,7 @@ export class Tester extends Worker {
         workflowId: string,
         branch: string
     ) {
+
         const octokit = new Octokit({ auth: getGitHubToken("tester") });
         const owner = repo.owner.login;
         const ref = branch;
@@ -60,8 +62,16 @@ export class Tester extends Worker {
         branch: string
     ) {
         const workflow_run_id = await this.triggerTestWorkflow(repo, workflowId, branch);
-        const workflowRun = await this.waitForWorkflowCompletion(repo, workflow_run_id);
-        return workflowRun;
+        const fields = { repositoryId: repo.id, runId: workflow_run_id, branch };
+
+        try {
+            const workflowRun = await this.waitForWorkflowCompletion(repo, workflow_run_id);
+
+            return workflowRun;
+        } catch (error) {
+            logger.error("Workflow wait failed", { ...fields, error });
+            throw error;
+        }
     }
 
     analyzeTestResultsAndCreateIssues(testResult: WorkflowRun): Promise<number> {

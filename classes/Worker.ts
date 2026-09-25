@@ -6,11 +6,14 @@ import {
 import { Codex, type Thread as CodexThread } from "@openai/codex-sdk";
 import type { WorkerRole } from "../types/WorkerRole.js";
 import { getWorkerEnvironment } from "../utils/github.js";
+import { randomUUID } from "node:crypto";
+import { logger, withLogContext } from "../utils/logger.js";
 
 export type WorkerType = "codex" | "claude";
 export type WorkerStatus = "idle" | "working" | "error";
 
 export class Worker {
+  readonly workerId = randomUUID();
   initialized = false;
   readonly type: WorkerType;
   status: WorkerStatus = "idle";
@@ -18,6 +21,7 @@ export class Worker {
   conversationId?: string;
 
   private codex: Codex | null = null;
+  private readonly queryClaude = queryClaude;
   private codexThread: CodexThread | null = null;
   private claudeQuery: ClaudeQuery | null = null;
   private abortController: AbortController | null = null;
@@ -56,6 +60,7 @@ export class Worker {
   }
 
   kill(): void {
+
     this.stopped = true;
     this.abortController?.abort();
     this.claudeQuery?.close();
@@ -70,26 +75,34 @@ export class Worker {
   }
 
   private enqueueTurn(prompt: string, generation: number): Promise<number> {
+    const queuedAt = Date.now();
+    const fields = { workerId: this.workerId, role: this.role, engine: this.type, workspace: this.root };
     this.pendingTurns += 1;
     this.status = "working";
+    this.say(`PROMPT (queued): ${prompt}`);
 
     const turn = this.turnQueue.then(async () => {
       if (this.stopped || generation !== this.generation) {
         throw new Error("Worker has been stopped");
       }
 
-      return this.type === "codex"
+      this.say("▶ Working");
+      return withLogContext(fields, () => this.type === "codex"
         ? this.runCodexTurn(prompt, generation)
-        : this.runClaudeTurn(prompt, generation);
+        : this.runClaudeTurn(prompt, generation));
     });
 
     const trackedTurn = turn.then(
       (result) => {
         this.finishTurn(generation, false);
+        this.say(this.status === "working" ? "✓ Turn finished; more work queued" : "✓ Idle — turn finished");
+
         return result;
       },
       (error: unknown) => {
         this.finishTurn(generation, true);
+        this.say("✗ Turn failed (see error below)");
+        logger.error("Agent turn failed", { ...fields, durationMs: Date.now() - queuedAt, error });
         throw error;
       },
     );
@@ -116,6 +129,10 @@ export class Worker {
     this.status = failed ? "error" : "idle";
   }
 
+  private say(message: string): void {
+    logger.agent(this.role, this.type, this.workerId, message);
+  }
+
   private async runCodexTurn(
     prompt: string,
     generation: number,
@@ -123,6 +140,8 @@ export class Worker {
     this.codex ??= new Codex({ env: getWorkerEnvironment(this.role) });
     this.codexThread ??= this.codex.startThread({
       ...(this.root ? { workingDirectory: this.root } : {}),
+      sandboxMode: "danger-full-access",
+      approvalPolicy: "never"
     });
     const codexThread = this.codexThread;
 
@@ -130,9 +149,26 @@ export class Worker {
     this.abortController = abortController;
 
     try {
-      await codexThread.run(prompt, {
+      const { events } = await codexThread.runStreamed(prompt, {
         signal: abortController.signal,
       });
+      let completed = false;
+      for await (const event of events) {
+        if (generation !== this.generation) throw new Error("Worker has been stopped");
+        if (event.type === "thread.started") this.conversationId = event.thread_id;
+        if (event.type === "item.completed" && event.item.type === "agent_message") {
+          this.say(event.item.text);
+        }
+        if (event.type === "item.started") {
+          if (event.item.type === "command_execution") this.say(`Running command: ${event.item.command}`);
+          if (event.item.type === "mcp_tool_call") this.say(`Using tool: ${event.item.server}/${event.item.tool}`);
+          if (event.item.type === "web_search") this.say("Searching the web");
+        }
+        if (event.type === "turn.failed") throw new Error(event.error.message);
+        if (event.type === "error") throw new Error(event.message);
+        if (event.type === "turn.completed") completed = true;
+      }
+      if (!completed) throw new Error("Codex worker ended without a completed turn");
 
       if (generation !== this.generation) {
         throw new Error("Worker has been stopped");
@@ -154,21 +190,25 @@ export class Worker {
     const abortController = new AbortController();
     this.abortController = abortController;
 
-    const claudeQuery = queryClaude({
+    const claudeQuery = this.queryClaude({
       prompt,
       options: {
         env: getWorkerEnvironment(this.role),
         abortController,
         ...(this.root ? { cwd: this.root } : {}),
         ...(this.conversationId ? { resume: this.conversationId } : {}),
+          permissionMode: "bypassPermissions",
+          allowDangerouslySkipPermissions: true,
       },
     });
     this.claudeQuery = claudeQuery;
 
     let result: SDKResultMessage | undefined;
+    let lastText: string | undefined;
 
     try {
       for await (const message of claudeQuery) {
+        if (generation !== this.generation) throw new Error("Worker has been stopped");
         if (
           generation === this.generation &&
           "session_id" in message &&
@@ -179,6 +219,15 @@ export class Worker {
 
         if (message.type === "result") {
           result = message;
+        }
+        if (message.type === "assistant") {
+          for (const block of message.message.content) {
+            if (block.type === "text") {
+              this.say(block.text);
+              lastText = block.text;
+            }
+            if (block.type === "tool_use") this.say(`Using tool: ${block.name}`);
+          }
         }
       }
     } finally {
@@ -205,6 +254,8 @@ export class Worker {
           : result.errors.join("; ");
       throw new Error(details || `Claude worker failed: ${result.subtype}`);
     }
+
+    if (result.result && result.result !== lastText) this.say(result.result);
 
     return 0;
   }
