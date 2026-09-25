@@ -29,24 +29,11 @@ export function registerWebhooks(webhooks: Webhooks, orchestrator: Orchestrator)
     orchestrator.spawnReviewerForPR(payload.pull_request)
   );
   onBackground("pull_request_review.submitted", async ({ payload }) => {
-    const pullRequest = payload.pull_request;
-    switch (payload.review.state.toLowerCase()) {
-      case "approved":
-        if (pullRequest.draft) {
-
-          return;
-        }
-        await orchestrator.mergePullRequest(pullRequest);
-        break;
-
-      case "changes_requested":
-        if (pullRequest.draft) {
-
-          return;
-        }
-        await orchestrator.tellAssignedWorkerToAddressReview(pullRequest);
-        break;
-    }
+    const pullRequest = payload.pull_request; 
+    if (pullRequest.draft) return;
+    if(payload.review.state.toLowerCase() == 'approved') 
+      await orchestrator.mergePullRequest(pullRequest);
+    else await orchestrator.tellAssignedWorkerToAddressReview(pullRequest);
   });
 
   onBackground("pull_request.synchronize", async ({payload}) => {
