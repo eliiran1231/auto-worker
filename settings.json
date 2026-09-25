@@ -1,6 +1,7 @@
 {
   "server": {
     "port": 3000,
+    "dashboardPort": 3001,
     "webhookPath": "/api/github/webhooks"
   },
   "github": {

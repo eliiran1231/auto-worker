@@ -2,6 +2,7 @@ import type { WorkerType } from "../classes/Worker.js";
 export interface Settings {
   server: {
     port: number;
+    dashboardPort: number;
     webhookPath: string;
   };
   github: {

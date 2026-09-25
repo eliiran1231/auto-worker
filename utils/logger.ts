@@ -6,7 +6,7 @@ export function withLogContext<T>(fields: Record<string, unknown>, work: () => T
   return context.run({ ...context.getStore(), ...fields }, work);
 }
 
-function redact(text: string): string {
+export function redact(text: string): string {
   for (const [name, value] of Object.entries(process.env)) {
     if (!value || !/TOKEN|SECRET|PASSWORD|API_KEY/i.test(name)) continue;
     for (const secret of [value, Buffer.from(`x-access-token:${value}`).toString("base64")]) {

@@ -7,8 +7,8 @@ import { Codex, type Thread as CodexThread } from "@openai/codex-sdk";
 import type { WorkerRole } from "../types/WorkerRole.js";
 import { getWorkerEnvironment } from "../utils/github.js";
 import { randomUUID } from "node:crypto";
-import { logger, withLogContext } from "../utils/logger.js";
-import type { SavedWorker, WorkerStore } from "./WorkerStore.js";
+import { logger, redact, withLogContext } from "../utils/logger.js";
+import type { AgentEvent, SavedWorker, WorkerStore } from "./WorkerStore.js";
 
 export type WorkerType = "codex" | "claude";
 export type WorkerStatus = "idle" | "working" | "error";
@@ -120,14 +120,14 @@ export class Worker {
     this.pendingPrompts.push(prompt);
     this.status = "working";
     this.persist();
-    this.say(`PROMPT (queued): ${prompt}`);
+    this.say(`PROMPT (queued): ${prompt}`, "prompt");
 
     const turn = this.turnQueue.then(async () => {
       if (this.stopped || generation !== this.generation) {
         throw new Error("Worker has been stopped");
       }
 
-      this.say("▶ Working");
+      this.say("Working", "status");
       return withLogContext(fields, () => this.type === "codex"
         ? this.runCodexTurn(prompt, generation)
         : this.runClaudeTurn(prompt, generation));
@@ -138,7 +138,7 @@ export class Worker {
         if (generation === this.generation) this.pendingPrompts.shift();
         this.finishTurn(generation, false);
         this.persist();
-        this.say(this.status === "working" ? "✓ Turn finished; more work queued" : "✓ Idle — turn finished");
+        this.say(this.status === "working" ? "Turn finished; more work queued" : "Idle — turn finished", "status");
 
         return result;
       },
@@ -146,7 +146,7 @@ export class Worker {
         if (generation === this.generation) this.pendingPrompts.shift();
         this.finishTurn(generation, true);
         this.persist();
-        this.say("✗ Turn failed (see error below)");
+        this.say(`Turn failed: ${error instanceof Error ? error.message : String(error)}`, "status");
         logger.error("Agent turn failed", { ...fields, durationMs: Date.now() - queuedAt, error });
         throw error;
       },
@@ -174,7 +174,8 @@ export class Worker {
     this.status = failed ? "error" : "idle";
   }
 
-  private say(message: string): void {
+  private say(message: string, kind: AgentEvent["kind"] = "output"): void {
+    this.persistence?.store.appendEvent(this.workerId, kind, redact(message));
     logger.agent(this.role, this.type, this.workerId, message);
   }
 
@@ -211,9 +212,9 @@ export class Worker {
           this.say(event.item.text);
         }
         if (event.type === "item.started") {
-          if (event.item.type === "command_execution") this.say(`Running command: ${event.item.command}`);
-          if (event.item.type === "mcp_tool_call") this.say(`Using tool: ${event.item.server}/${event.item.tool}`);
-          if (event.item.type === "web_search") this.say("Searching the web");
+          if (event.item.type === "command_execution") this.say(`Running command: ${event.item.command}`, "activity");
+          if (event.item.type === "mcp_tool_call") this.say(`Using tool: ${event.item.server}/${event.item.tool}`, "activity");
+          if (event.item.type === "web_search") this.say("Searching the web", "activity");
         }
         if (event.type === "turn.failed") throw new Error(event.error.message);
         if (event.type === "error") throw new Error(event.message);
@@ -279,7 +280,7 @@ export class Worker {
               this.say(block.text);
               lastText = block.text;
             }
-            if (block.type === "tool_use") this.say(`Using tool: ${block.name}`);
+            if (block.type === "tool_use") this.say(`Using tool: ${block.name}`, "activity");
           }
         }
       }

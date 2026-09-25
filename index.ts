@@ -7,6 +7,7 @@ import { settings } from "./settings.js";
 import { AgentFactory } from "./AgentFactory.js";
 import { WorkerStore } from "./classes/WorkerStore.js";
 import path from "node:path";
+import { createDashboardApp } from "./utils/createDashboardApp.js";
 
 const workerStore = new WorkerStore(path.resolve(process.env.WORKER_DB_PATH ?? "data/workers.sqlite"));
 AgentFactory.restoreFrom(workerStore);
@@ -26,4 +27,8 @@ const app = createWebhookApp(webhooks);
 
 app.listen(port, () => {
   console.log(`🚀 Server is listening for GitHub webhooks on port ${port}`);
+});
+
+createDashboardApp(workerStore).listen(settings.server.dashboardPort, "127.0.0.1", () => {
+  console.log(`Dashboard: http://127.0.0.1:${settings.server.dashboardPort}`);
 });
