@@ -10,6 +10,7 @@ export interface Settings {
   };
   workspace: {
     defaultRoot: string;
+    playgroundDirectory: string;
     repositoryPrefixLength: number;
     issueDirectoryTemplate: string;
     testerDirectoryTemplate: string;

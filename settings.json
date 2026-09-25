@@ -9,6 +9,7 @@
   },
   "workspace": {
     "defaultRoot": "c:/",
+    "playgroundDirectory": "./playground",
     "repositoryPrefixLength": 3,
     "issueDirectoryTemplate": "./{repositoryPrefix}-i-{issueNumber}",
     "testerDirectoryTemplate": "./{repositoryPrefix}-{repositoryId}-tests"

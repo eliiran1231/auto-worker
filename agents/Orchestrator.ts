@@ -1,4 +1,4 @@
-import { rm } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { Octokit } from "octokit";
 import { AgentFactory } from "../AgentFactory.js";
@@ -72,10 +72,26 @@ export class Orchestrator {
     repository: Repository,
     role: WorkerRole = "coder",
   ): Promise<string> {
-    const workspacePath = path.resolve(clonedRepoPath);
+    const workspacePath = this.resolvePlaygroundWorkspace(clonedRepoPath);
+    await mkdir(path.dirname(workspacePath), { recursive: true });
     await createRoleGit(process.cwd(), role)
       .clone(repository.clone_url, workspacePath);
     this.managedWorkspaces.add(workspacePath);
+    return workspacePath;
+  }
+
+  private resolvePlaygroundWorkspace(name: string): string {
+    const projectRoot = path.resolve(process.cwd());
+    const playground = path.resolve(settings.workspace.playgroundDirectory);
+    const playgroundRelative = path.relative(projectRoot, playground);
+    if (!playgroundRelative || playgroundRelative === ".." || playgroundRelative.startsWith(`..${path.sep}`) || path.isAbsolute(playgroundRelative)) {
+      throw new Error(`Playground must be a folder within the project: ${playground}`);
+    }
+    const workspacePath = path.resolve(playground, name);
+    const relative = path.relative(playground, workspacePath);
+    if (!relative || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+      throw new Error(`Invalid playground workspace name: ${name}`);
+    }
     return workspacePath;
   }
 
@@ -257,7 +273,7 @@ export class Orchestrator {
     let scan = this.store?.loadScans().find(saved => saved.repository.id === repository.id);
     const restoredTester = scan ? AgentFactory.getTester(repository.id) : undefined;
     const workspacePath = scan
-      ? path.resolve(restoredTester?.root ?? rootPath)
+      ? path.resolve(restoredTester?.root ?? this.resolvePlaygroundWorkspace(rootPath))
       : await this.setupWorkspace(rootPath, repository, "tester");
     const tester = scan
       ? restoredTester ?? AgentFactory.createTester(repository.id, workspacePath)
