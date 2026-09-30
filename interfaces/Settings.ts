@@ -8,6 +8,7 @@ export interface Settings {
   github: {
     username: string;
     linkedIssuesLimit: number;
+    closeLinkedIssuesWhenMergingTo: string;
   };
   workspace: {
     defaultRoot: string;

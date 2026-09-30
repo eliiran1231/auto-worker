@@ -138,9 +138,20 @@ function SettingsEditor({ config, onSaved }: { config: Config; onSaved: (next: C
 
   return <div className="settings-page">
     <div className="section-heading"><div><div className="eyebrow">CONFIGURATION</div><h2>Live settings</h2><p>Changes apply to new work immediately. Current agent turns keep their existing prompt and engine.</p></div></div>
+    <section className="settings-card">
+      <div className="settings-card-head"><span className="settings-section-icon">✓</span><div><h3>Issue closure</h3><p>Choose which target branch triggers automatic issue closure.</p></div></div>
+      <div className="settings-fields"><label className="wide-field" htmlFor="close-issues-branch">
+        <span>Close linked issues when merging to</span>
+        <input id="close-issues-branch" type="text" placeholder="dev"
+          value={draft.github.closeLinkedIssuesWhenMergingTo ?? "dev"}
+          onChange={event => change("github", "closeLinkedIssuesWhenMergingTo", event.target.value)}
+          aria-describedby="close-issues-help" />
+        <p id="close-issues-help">Linked issues close only after a successful merge into this branch. Default: dev.</p>
+      </label></div>
+    </section>
     {Object.entries(draft).map(([section, values]) => <section className="settings-card" key={section}>
       <div className="settings-card-head"><span className="settings-section-icon">{section.slice(0, 1).toUpperCase()}</span><div><h3>{section}</h3><p>{section === "server" ? "Listener settings are shown for reference and require a restart." : "Applied to the running server when saved."}</p></div></div>
-      <div className="settings-fields">{Object.entries(values).map(([key, value]) => <label className={section === "prompts" || section === "queries" ? "wide-field" : ""} key={key}>
+      <div className="settings-fields">{Object.entries(values).filter(([key]) => section !== "github" || key !== "closeLinkedIssuesWhenMergingTo").map(([key, value]) => <label className={section === "prompts" || section === "queries" ? "wide-field" : ""} key={key}>
         <span>{key.replace(/([A-Z])/g, " $1").replace(/^./, letter => letter.toUpperCase())}</span>
         {section === "prompts" || section === "queries"
           ? <textarea value={value} disabled={section === "server"} rows={section === "prompts" ? 4 : 3} onChange={event => change(section, key, event.target.value)} />

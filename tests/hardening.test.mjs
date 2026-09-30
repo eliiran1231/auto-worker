@@ -72,6 +72,49 @@ test("role Git instances pass isolated credentials to subsequent Git commands", 
   }
 });
 
+test("merged PR cleanup closes related issues before releasing agents; unmerged closure leaves issues open", async (t) => {
+  const worker = orchestrator(t);
+  const calls = [];
+  const issues = [{ id: "issue-node-1", number: 17 }, { id: "issue-node-2", number: 18 }];
+  t.mock.method(worker, "getLinkedIssues", async () => issues);
+  const close = t.mock.method(worker.octokit, "graphql", async (query, variables) => {
+    assert.match(query, /state: CLOSED/);
+    calls.push(`close:${variables.id}`);
+  });
+  t.mock.method(worker, "releaseCoder", async id => { calls.push(`release:${id}`); });
+  t.mock.method(worker, "releaseReviewer", id => { calls.push(`reviewer:${id}`); });
+  const pr = { id: 9, number: 157, merged: true, base: { ref: "dev", repo: repo(1) } };
+  await worker.iterationCleanup(pr);
+  assert.deepEqual(calls, ["close:issue-node-1", "close:issue-node-2", "release:issue-node-1", "release:issue-node-2", "reviewer:9"]);
+  calls.length = 0;
+  await worker.iterationCleanup({ ...pr, merged: false });
+  assert.equal(close.mock.callCount(), 2);
+  assert.deepEqual(calls, ["release:issue-node-1", "release:issue-node-2", "reviewer:9"]);
+  await worker.iterationCleanup({ ...pr, base: { ...pr.base, ref: "master" } });
+  assert.equal(close.mock.callCount(), 2);
+  const previousBranch = settings.github.closeLinkedIssuesWhenMergingTo;
+  t.after(() => { settings.github.closeLinkedIssuesWhenMergingTo = previousBranch; });
+  settings.github.closeLinkedIssuesWhenMergingTo = "release";
+  await worker.iterationCleanup(pr);
+  assert.equal(close.mock.callCount(), 2);
+  await worker.iterationCleanup({ ...pr, base: { ...pr.base, ref: "release" } });
+  assert.equal(close.mock.callCount(), 4);
+});
+
+test("failed issue closure keeps agents available and can be retried", async (t) => {
+  const worker = orchestrator(t);
+  t.mock.method(worker, "getLinkedIssues", async () => [{ id: "issue-node", number: 17 }]);
+  const close = t.mock.method(worker.octokit, "graphql", async () => { throw new Error("GitHub unavailable"); });
+  const release = t.mock.method(worker, "releaseCoder", async () => {});
+  t.mock.method(worker, "releaseReviewer", () => {});
+  const pr = { id: 9, number: 157, merged: true, base: { ref: "dev", repo: repo(1) } };
+  await assert.rejects(worker.iterationCleanup(pr), /GitHub unavailable/);
+  assert.equal(release.mock.callCount(), 0);
+  close.mock.mockImplementation(async () => ({}));
+  await worker.iterationCleanup(pr);
+  assert.equal(release.mock.callCount(), 1);
+});
+
 test("completion replay is bounded by count and age", (t) => {
   let now = 1000;
   t.mock.method(Date, "now", () => now);

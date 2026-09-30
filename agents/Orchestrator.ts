@@ -205,6 +205,16 @@ export class Orchestrator {
     return data;
   }
 
+  /** Close an issue by its GitHub GraphQL node ID, including issues in other repositories. */
+  async closeIssue(issueId: string): Promise<void> {
+    await this.octokit.graphql(
+      `mutation CloseIssue($id: ID!) {
+        updateIssue(input: { id: $id, state: CLOSED }) { issue { id state } }
+      }`,
+      { id: issueId },
+    );
+  }
+
   async releaseCoder(issueId: AgentId): Promise<void> {
     const coder = AgentFactory.getCoder(issueId);
     if (!coder) return;
@@ -237,6 +247,12 @@ export class Orchestrator {
       repo,
       owner,
     );
+
+    if (pullRequest.merged && pullRequest.base.ref === settings.github.closeLinkedIssuesWhenMergingTo.trim()) {
+      for (const issue of linkedIssues) {
+        await this.closeIssue(issue.id);
+      }
+    }
 
     this.linkedIssuesMap.delete(
       this.linkedIssuesCacheKey(owner, repo, pullRequest.number),
