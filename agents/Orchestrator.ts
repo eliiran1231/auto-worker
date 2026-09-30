@@ -43,6 +43,21 @@ export class Orchestrator {
     }
   }
 
+  async startTesterScan(owner: string, repo: string): Promise<{ repository: string; status: "started" | "already_running" }> {
+    if (!settings.tests.differential.trim()) throw new Error("Set tests.differential before starting a scan");
+    const github = new Octokit({ auth: getGitHubToken("tester") });
+    const { data } = await github.rest.repos.get({ owner, repo });
+    const repository: Repository = {
+      id: data.id, name: data.name, clone_url: data.clone_url, owner: { login: data.owner.login },
+    };
+    if (this.testerScans.has(repository.id)) {
+      return { repository: data.full_name, status: "already_running" };
+    }
+    void this.spawnATesterToFindBugs(repository).catch(error =>
+      logger.error("Dashboard tester scan failed", { repositoryId: repository.id, error }));
+    return { repository: data.full_name, status: "started" };
+  }
+
   async getLinkedIssues(
     pr: number,
     repo: string,

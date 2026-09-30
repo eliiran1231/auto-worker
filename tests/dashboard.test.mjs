@@ -13,7 +13,13 @@ test("dashboard exposes agent history and rejects invalid live settings", async 
   const store = new WorkerStore(path.join(directory, "dashboard.sqlite"));
   store.save({ role: "coder", agentId: "issue-3", workerId: "worker-3", type: "codex", root: null, initialized: true, status: "working", conversationId: "thread-3", pending: ["fix issue"] });
   store.appendEvent("worker-3", "prompt", "fix issue");
-  const server = createDashboardApp(store).listen(0, "127.0.0.1");
+  const scanRequests = [];
+  const server = createDashboardApp(store, {
+    async startTesterScan(owner, repo) {
+      scanRequests.push({ owner, repo });
+      return { repository: `${owner}/${repo}`, status: "started" };
+    },
+  }).listen(0, "127.0.0.1");
   await once(server, "listening");
   const base = `http://127.0.0.1:${server.address().port}`;
   try {
@@ -33,6 +39,17 @@ test("dashboard exposes agent history and rejects invalid live settings", async 
     assert.equal(settings.server.port, invalid.server.port - 1);
     const unknown = await fetch(`${base}/api/agents/missing/events`);
     assert.equal(unknown.status, 404);
+    const startScan = (repository, origin) => fetch(`${base}/api/tester-scans`, {
+      method: "POST", headers: { "Content-Type": "application/json", ...(origin ? { Origin: origin } : {}) },
+      body: JSON.stringify({ repository }),
+    });
+    assert.equal((await startScan("https://github.com/owner/repo")).status, 400);
+    assert.equal((await startScan("owner/repo", "https://example.com")).status, 403);
+    assert.deepEqual(scanRequests, []);
+    const started = await startScan(" owner/repo ");
+    assert.equal(started.status, 202);
+    assert.deepEqual(await started.json(), { repository: "owner/repo", status: "started" });
+    assert.deepEqual(scanRequests, [{ owner: "owner", repo: "repo" }]);
   } finally {
     await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
     store.close();

@@ -115,6 +115,44 @@ function SettingsEditor({ config, onSaved }: { config: Config; onSaved: (next: C
   </div>;
 }
 
+function StartTesterScan() {
+  const [repository, setRepository] = useState("");
+  const [starting, setStarting] = useState(false);
+  const [message, setMessage] = useState("");
+  const [failed, setFailed] = useState(false);
+
+  async function start(event: React.FormEvent) {
+    event.preventDefault();
+    setStarting(true);
+    setMessage("");
+    setFailed(false);
+    try {
+      const result = await request<{ repository: string; status: "started" | "already_running" }>("/api/tester-scans", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repository: repository.trim() }),
+      });
+      setMessage(result.status === "already_running"
+        ? `A scan is already running for ${result.repository}.`
+        : `Scan requested for ${result.repository}. The tester window will appear after the repository is cloned.`);
+    } catch (error) {
+      setFailed(true);
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally { setStarting(false); }
+  }
+
+  return <form className="start-scan" onSubmit={start}>
+    <label htmlFor="scan-repository">Start the loop</label>
+    <div className="scan-controls">
+      <input id="scan-repository" placeholder="owner/repository" value={repository} required
+        disabled={starting} onChange={event => setRepository(event.target.value)} />
+      <button className="primary-button" disabled={starting || !repository.trim()} type="submit">
+        {starting ? "Starting scan…" : "Start tester scan"}
+      </button>
+    </div>
+    {message && <p className={failed ? "error-text" : ""} role={failed ? "alert" : "status"}>{message}</p>}
+  </form>;
+}
+
 function App() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [events, setEvents] = useState<Record<string, AgentEvent[]>>({});
@@ -194,6 +232,7 @@ function App() {
       <div className="content">
         {error && <div className="error-banner">{error}</div>}
         {view === "agents" ? <>
+          <StartTesterScan />
           <div className="hero"><div><div className="eyebrow">OPERATIONS OVERVIEW</div><h1>Agent activity<span className="heading-dot">.</span></h1><p>Follow each agent’s prompts, progress, and output as work happens.</p></div><div className="hero-metrics"><div><strong>{activeCount}</strong><span>ACTIVE AGENTS</span></div><div><strong>{workingCount}</strong><span>WORKING NOW</span></div><div><strong>{agents.length - activeCount}</strong><span>COMPLETED</span></div></div></div>
           <div className="toolbar"><div className="segment"><button className={filter === "active" ? "chosen" : ""} onClick={() => setFilter("active")}>Active</button><button className={filter === "all" ? "chosen" : ""} onClick={() => setFilter("all")}>All agents</button></div><div className="search-wrap"><span>⌕</span><input aria-label="Search agents" placeholder="Search agents or workspaces" value={search} onChange={event => setSearch(event.target.value)} /></div></div>
           {visible.length ? <div className="agent-grid">{visible.map(agent => <AgentWindow key={agent.workerId} agent={agent} events={events[agent.workerId] ?? []} hasOlder={hasOlder[agent.workerId] ?? false} loadOlder={() => void loadOlder(agent.workerId)} />)}</div> : <div className="empty-state"><div>◇</div><h3>No agents in this view</h3><p>Agents appear here when webhooks assign work to coders, reviewers, or testers.</p></div>}

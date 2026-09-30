@@ -29,6 +29,6 @@ app.listen(port, () => {
   console.log(`🚀 Server is listening for GitHub webhooks on port ${port}`);
 });
 
-createDashboardApp(workerStore).listen(settings.server.dashboardPort, "127.0.0.1", () => {
+createDashboardApp(workerStore, orchestrator).listen(settings.server.dashboardPort, "127.0.0.1", () => {
   console.log(`Dashboard: http://127.0.0.1:${settings.server.dashboardPort}`);
 });

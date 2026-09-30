@@ -3,8 +3,10 @@ import path from "node:path";
 import { existsSync } from "node:fs";
 import { WorkerStore } from "../classes/WorkerStore.js";
 import { settings, updateSettings } from "../settings.js";
+import type { Orchestrator } from "../agents/Orchestrator.js";
+import { redact } from "./logger.js";
 
-export function createDashboardApp(store: WorkerStore) {
+export function createDashboardApp(store: WorkerStore, orchestrator?: Pick<Orchestrator, "startTesterScan">) {
   const app = express();
   app.disable("x-powered-by");
   app.use((request, response, next) => {
@@ -16,6 +18,34 @@ export function createDashboardApp(store: WorkerStore) {
     next();
   });
   app.use("/api", express.json({ limit: "128kb" }));
+
+  app.post("/api/tester-scans", async (request, response) => {
+    const origin = request.get("origin");
+    if (origin) {
+      let hostname = "";
+      try { hostname = new URL(origin).hostname.toLowerCase(); } catch { /* rejected below */ }
+      if (!["localhost", "127.0.0.1", "[::1]"].includes(hostname)) {
+        response.status(403).json({ error: "Scan requests are local only" });
+        return;
+      }
+    }
+    const repository = request.body?.repository;
+    if (typeof repository !== "string" || !/^[A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9_.-]+$/.test(repository.trim())) {
+      response.status(400).json({ error: "Enter a GitHub repository as owner/repository" });
+      return;
+    }
+    if (!orchestrator) {
+      response.status(503).json({ error: "Tester scans are unavailable" });
+      return;
+    }
+    try {
+      const [owner, repo] = repository.trim().split("/");
+      const result = await orchestrator.startTesterScan(owner, repo);
+      response.status(result.status === "started" ? 202 : 200).json(result);
+    } catch (error) {
+      response.status(400).json({ error: redact(error instanceof Error ? error.message : String(error)) });
+    }
+  });
 
   app.get("/api/agents", (_request, response) => {
     response.json(store.load(true));
