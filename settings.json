@@ -28,7 +28,7 @@
     "completionReplayMs": 300000
   },
   "prompts": {
-    "workOnIssue": "work on issue {issueUrl}. after you are done, and only when you are ready for review, open a PR assigned to me with the issue linked at the development section. after opening the PR you should end the session as quickly as possible.",
+    "workOnIssue": "work on issue {issueUrl}. after you are done, and only when you are ready for review, open a PR and then assign it to me with the issue linked at the development section. after opening the PR you should end the session as quickly as possible.",
     "reviewPullRequest": "review this pull request {pullRequestUrl}. if you approve, submit approval. if you don't approve, submit changes requested with your feedback. make sure to run the differential test before approving unless there is already a test linked in the PR that passed and isn't outdated ",
     "addressReview": "you got a review on {pullRequestUrl}",
     "reReviewPullRequest": "your review got a response on {pullRequestUrl}. re-review the pull request and submit your feedback. make sure to run the differential test before approving.",

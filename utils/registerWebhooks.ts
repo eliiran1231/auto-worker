@@ -25,7 +25,7 @@ export function registerWebhooks(webhooks: Webhooks, orchestrator: Orchestrator)
      orchestrator.spawnWorkerToResolveIssue(payload.issue, payload.repository)
   );
 
-  onBackground("pull_request.opened", ({ payload }) =>
+  onBackground("pull_request.assigned", ({ payload }) =>
     orchestrator.spawnReviewerForPR(payload.pull_request)
   );
   onBackground("pull_request_review.submitted", async ({ payload }) => {
