@@ -35,6 +35,11 @@ export class AgentFactory {
     return role === "coder" ? this.coders : role === "reviewer" ? this.reviewers : this.testers;
   }
 
+  static getWorker(workerId: string): Worker | undefined {
+    return [...Object.values(this.coders), ...Object.values(this.reviewers), ...Object.values(this.testers)]
+      .find(worker => worker.workerId === workerId);
+  }
+
   static registerCoder(issueId: AgentId, coder: Coder): void {
     AgentFactory.coders[issueId] = coder;
     this.store && coder.attachStore(this.store, String(issueId));

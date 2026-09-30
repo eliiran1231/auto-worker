@@ -4,7 +4,8 @@ import { existsSync } from "node:fs";
 import { WorkerStore } from "../classes/WorkerStore.js";
 import { settings, updateSettings } from "../settings.js";
 import type { Orchestrator } from "../agents/Orchestrator.js";
-import { redact } from "./logger.js";
+import { logger, redact } from "./logger.js";
+import { AgentFactory } from "../AgentFactory.js";
 
 export function createDashboardApp(store: WorkerStore, orchestrator?: Pick<Orchestrator, "startTesterScan">) {
   const app = express();
@@ -49,6 +50,39 @@ export function createDashboardApp(store: WorkerStore, orchestrator?: Pick<Orche
 
   app.get("/api/agents", (_request, response) => {
     response.json(store.load(true));
+  });
+  app.post("/api/agents/:workerId/messages", (request, response) => {
+    const origin = request.get("origin");
+    if (origin) {
+      let hostname = "";
+      try { hostname = new URL(origin).hostname.toLowerCase(); } catch { /* rejected below */ }
+      if (!["localhost", "127.0.0.1", "[::1]"].includes(hostname)) {
+        response.status(403).json({ error: "Agent messages are local only" });
+        return;
+      }
+    }
+    const message = request.body?.message;
+    if (typeof message !== "string" || !message.trim() || message.length > 32000) {
+      response.status(400).json({ error: "Enter a message between 1 and 32,000 characters" });
+      return;
+    }
+    const saved = store.load(true).find(worker => worker.workerId === request.params.workerId);
+    if (!saved) {
+      response.status(404).json({ error: "Agent not found" });
+      return;
+    }
+    const worker = AgentFactory.getWorker(saved.workerId);
+    if (saved.archived || !worker?.initialized) {
+      response.status(409).json({ error: "This agent is not available for messages" });
+      return;
+    }
+    try {
+      void worker.send(message.trim()).catch(error =>
+        logger.error("Dashboard agent message failed", { workerId: worker.workerId, error }));
+      response.status(202).json({ status: "queued" });
+    } catch (error) {
+      response.status(409).json({ error: redact(error instanceof Error ? error.message : String(error)) });
+    }
   });
   app.get("/api/agents/:workerId/events", (request, response) => {
     if (!store.load(true).some(worker => worker.workerId === request.params.workerId)) {

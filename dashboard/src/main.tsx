@@ -37,6 +37,31 @@ function shortPath(value: string | null) {
 }
 
 function AgentWindow({ agent, events, hasOlder, loadOlder }: { agent: Agent; events: AgentEvent[]; hasOlder: boolean; loadOlder: () => void }) {
+  const [message, setMessage] = useState("");
+  const [sending, setSending] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [sendFailed, setSendFailed] = useState(false);
+  const canMessage = !agent.archived && agent.initialized;
+
+  async function sendMessage(event: React.FormEvent) {
+    event.preventDefault();
+    if (sending || !canMessage || !message.trim()) return;
+    setSending(true);
+    setNotice("");
+    setSendFailed(false);
+    try {
+      await request(`/api/agents/${agent.workerId}/messages`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message }),
+      });
+      setMessage("");
+      setNotice("Message queued. Follow the response in this window.");
+    } catch (error) {
+      setSendFailed(true);
+      setNotice(error instanceof Error ? error.message : String(error));
+    } finally { setSending(false); }
+  }
+
   const list = useRef<HTMLDivElement>(null);
   const loadingOlder = useRef(false);
   const previousHeight = useRef(0);
@@ -68,6 +93,19 @@ function AgentWindow({ agent, events, hasOlder, loadOlder }: { agent: Agent; eve
         <div className="event-body">{event.message}</div>
       </div>)}
     </div>
+    {canMessage && <form className="agent-message" onSubmit={sendMessage}>
+      <label htmlFor={`message-${agent.workerId}`}>Message this {agent.role}</label>
+      <textarea id={`message-${agent.workerId}`} rows={2} maxLength={32000} value={message}
+        placeholder="Give feedback or instructions…" disabled={sending}
+        onChange={event => { setMessage(event.target.value); setNotice(""); }} />
+      <div className="agent-message-actions">
+        <span>Messages run in order after the current turn.</span>
+        <button className="primary-button" type="submit" disabled={sending || !message.trim()}>
+          {sending ? "Sending…" : "Send message"}
+        </button>
+      </div>
+      {notice && <p className={sendFailed ? "error-text" : ""} role={sendFailed ? "alert" : "status"}>{notice}</p>}
+    </form>}
     <div className="window-footer"><span>LIVE FEED</span><span>{events.length} events</span></div>
   </section>;
 }
