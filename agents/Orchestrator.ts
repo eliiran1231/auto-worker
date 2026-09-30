@@ -1,4 +1,4 @@
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import path from "node:path";
 import { Octokit } from "octokit";
 import { AgentFactory } from "../AgentFactory.js";
@@ -87,8 +87,15 @@ export class Orchestrator {
     repository: Repository,
     role: WorkerRole = "coder",
   ): Promise<string> {
-    const workspacePath = this.resolvePlaygroundWorkspace(clonedRepoPath);
+    let workspacePath = this.resolvePlaygroundWorkspace(clonedRepoPath);
     await mkdir(path.dirname(workspacePath), { recursive: true });
+    // Reserve an empty directory exclusively; an earlier run may own the usual path.
+    try {
+      await mkdir(workspacePath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      workspacePath = await mkdtemp(`${workspacePath}-`);
+    }
     await createRoleGit(process.cwd(), role)
       .clone(repository.clone_url, workspacePath);
     this.managedWorkspaces.add(workspacePath);
@@ -288,7 +295,7 @@ export class Orchestrator {
     let scan = this.store?.loadScans().find(saved => saved.repository.id === repository.id);
     const restoredTester = scan ? AgentFactory.getTester(repository.id) : undefined;
     const workspacePath = scan
-      ? path.resolve(restoredTester?.root ?? this.resolvePlaygroundWorkspace(rootPath))
+      ? path.resolve(restoredTester?.root ?? scan.workspacePath ?? this.resolvePlaygroundWorkspace(rootPath))
       : await this.setupWorkspace(rootPath, repository, "tester");
     const tester = scan
       ? restoredTester ?? AgentFactory.createTester(repository.id, workspacePath)
@@ -299,7 +306,7 @@ export class Orchestrator {
         const branch = `farm/tests-${Date.now()}`;
         await git.fetch("origin", "dev");
         await git.checkout(["-b", branch, "origin/dev"]);
-        scan = { repository, branch, phase: "writing" };
+        scan = { repository, branch, phase: "writing", workspacePath };
         this.store?.saveScan(scan);
       }
       const newBranch = scan.branch;

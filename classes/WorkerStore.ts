@@ -16,6 +16,7 @@ export interface AgentEvent {
 
 export interface SavedScan {
   repository: Repository;
+  workspacePath?: string;
   branch: string;
   phase: "writing" | "testing" | "analyzing";
   workflowRun?: WorkflowRun;
