@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { Webhooks } from "@octokit/webhooks";
 import { registerWebhooks } from "../utils/registerWebhooks.ts";
 import { Orchestrator } from "../agents/Orchestrator.ts";
+import { AgentFactory } from "../AgentFactory.ts";
 import { WorkflowManager } from "../classes/workflowManager.ts";
 import { createRoleGit } from "../utils/git.ts";
 import { settings } from "../settings.ts";
@@ -72,10 +73,34 @@ test("role Git instances pass isolated credentials to subsequent Git commands", 
   }
 });
 
+test("linked database IDs retrieve the coder registered for the webhook issue", async (t) => {
+  const worker = orchestrator(t);
+  const id = 5664963994;
+  const nodeId = "I_kwDOTvgmos8AAAABUah9mg";
+  const addressReview = t.mock.fn(async () => {});
+  const previousCoders = AgentFactory.coders;
+  t.after(() => { AgentFactory.coders = previousCoders; });
+  AgentFactory.coders = { [id]: { status: "idle", addressReview } };
+  const query = t.mock.method(worker.octokit, "graphql", async (query) => {
+    assert.match(query, /id:\s*fullDatabaseId/);
+    assert.match(query, /nodeId:\s*id/);
+    return { repository: { pullRequest: { closingIssuesReferences: {
+      nodes: [{ id: String(id), nodeId, number: 17, title: "Fix bug" }],
+    } } } };
+  });
+  const pr = { id: 9, number: 157, base: { repo: repo(1) } };
+  await worker.tellAssignedWorkerToAddressReview(pr);
+  assert.deepEqual(addressReview.mock.calls[0].arguments, [pr]);
+  assert.deepEqual(await worker.getLinkedIssues(157, "same", "owner"), [
+    { id, nodeId, number: 17, title: "Fix bug" },
+  ]);
+  assert.equal(query.mock.callCount(), 1);
+});
+
 test("merged PR cleanup closes related issues before releasing agents; unmerged closure leaves issues open", async (t) => {
   const worker = orchestrator(t);
   const calls = [];
-  const issues = [{ id: "issue-node-1", number: 17 }, { id: "issue-node-2", number: 18 }];
+  const issues = [{ id: 5664963994, nodeId: "issue-node-1", number: 17 }, { id: 5664963995, nodeId: "issue-node-2", number: 18 }];
   t.mock.method(worker, "getLinkedIssues", async () => issues);
   const close = t.mock.method(worker.octokit, "graphql", async (query, variables) => {
     assert.match(query, /state: CLOSED/);
@@ -85,11 +110,11 @@ test("merged PR cleanup closes related issues before releasing agents; unmerged 
   t.mock.method(worker, "releaseReviewer", id => { calls.push(`reviewer:${id}`); });
   const pr = { id: 9, number: 157, merged: true, base: { ref: "dev", repo: repo(1) } };
   await worker.iterationCleanup(pr);
-  assert.deepEqual(calls, ["close:issue-node-1", "close:issue-node-2", "release:issue-node-1", "release:issue-node-2", "reviewer:9"]);
+  assert.deepEqual(calls, ["close:issue-node-1", "close:issue-node-2", "release:5664963994", "release:5664963995", "reviewer:9"]);
   calls.length = 0;
   await worker.iterationCleanup({ ...pr, merged: false });
   assert.equal(close.mock.callCount(), 2);
-  assert.deepEqual(calls, ["release:issue-node-1", "release:issue-node-2", "reviewer:9"]);
+  assert.deepEqual(calls, ["release:5664963994", "release:5664963995", "reviewer:9"]);
   await worker.iterationCleanup({ ...pr, base: { ...pr.base, ref: "master" } });
   assert.equal(close.mock.callCount(), 2);
   const previousBranch = settings.github.closeLinkedIssuesWhenMergingTo;
@@ -103,7 +128,7 @@ test("merged PR cleanup closes related issues before releasing agents; unmerged 
 
 test("failed issue closure keeps agents available and can be retried", async (t) => {
   const worker = orchestrator(t);
-  t.mock.method(worker, "getLinkedIssues", async () => [{ id: "issue-node", number: 17 }]);
+  t.mock.method(worker, "getLinkedIssues", async () => [{ id: 5664963994, nodeId: "issue-node", number: 17 }]);
   const close = t.mock.method(worker.octokit, "graphql", async () => { throw new Error("GitHub unavailable"); });
   const release = t.mock.method(worker, "releaseCoder", async () => {});
   t.mock.method(worker, "releaseReviewer", () => {});

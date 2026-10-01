@@ -37,6 +37,6 @@
     "analyzeTestResultsAndCreateIssues": "The tests you wrote have been merged into dev. Analyze the completed test workflow at {testResultUrl}. Check existing issues first so a resumed run does not create a duplicate for the same failing test. create a GitHub issue with all the findings that dont have an issue already and identifies the failing test and expected behavior, then assign it to {assignee}. The coder will branch from dev, which already contains your tests."
   },
   "queries": {
-    "linkedIssues": "query($owner: String!, $repo: String!, $pr: Int!, $limit: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $pr) { closingIssuesReferences(first: $limit) { nodes { id number title } } } } }"
+    "linkedIssues": "query($owner: String!, $repo: String!, $pr: Int!, $limit: Int!) { repository(owner: $owner, name: $repo) { pullRequest(number: $pr) { closingIssuesReferences(first: $limit) { nodes { id: fullDatabaseId nodeId: id number title } } } } }"
   }
 }

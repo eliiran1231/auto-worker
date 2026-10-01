@@ -1,5 +1,6 @@
 export interface LinkedIssue {
-  id: string;
+  id: number;
+  nodeId: string;
   number: number;
   title: string;
 }

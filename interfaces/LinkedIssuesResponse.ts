@@ -4,7 +4,7 @@ export interface LinkedIssuesResponse {
   repository: {
     pullRequest: {
       closingIssuesReferences: {
-        nodes: LinkedIssue[];
+        nodes: (Omit<LinkedIssue, "id"> & { id: string | number | null })[];
       };
     };
   };

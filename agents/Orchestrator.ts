@@ -77,7 +77,13 @@ export class Orchestrator {
       },
     );
 
-    const issues = repository.pullRequest.closingIssuesReferences.nodes;
+    const issues = repository.pullRequest.closingIssuesReferences.nodes.map(issue => {
+      const id = Number(issue.id);
+      if (!Number.isSafeInteger(id) || id <= 0) {
+        throw new Error(`Invalid database ID for linked issue ${issue.nodeId}: ${issue.id}`);
+      }
+      return { ...issue, id };
+    });
     this.linkedIssuesMap.set(cacheKey, issues);
     return issues;
   }
@@ -250,7 +256,7 @@ export class Orchestrator {
 
     if (pullRequest.merged && pullRequest.base.ref === settings.github.closeLinkedIssuesWhenMergingTo.trim()) {
       for (const issue of linkedIssues) {
-        await this.closeIssue(issue.id);
+        await this.closeIssue(issue.nodeId);
       }
     }
 
