@@ -1,4 +1,14 @@
 {
+  "email": {
+    "enabled": true,
+    "host": "smtp.gmail.com",
+    "port": 587,
+    "secure": false,
+    "from": "mma911615@gmail.com",
+    "to": "mma911615@gmail.com",
+    "username": "mma911615@gmail.com",
+    "passwordEnv": "SMTP_PASSWORD"
+  },
   "server": {
     "port": 3000,
     "dashboardPort": 3001,

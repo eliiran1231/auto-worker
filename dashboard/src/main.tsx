@@ -22,7 +22,7 @@ type AgentEvent = {
   message: string;
   createdAt: string;
 };
-type Config = Record<string, Record<string, string | number>>;
+type Config = Record<string, Record<string, string | number | boolean>>;
 type View = "agents" | "settings";
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
@@ -110,6 +110,95 @@ function AgentWindow({ agent, events, hasOlder, loadOlder }: { agent: Agent; eve
   </section>;
 }
 
+function EmailSettings({ email, onChange, unsaved }: {
+  email: Config[string];
+  unsaved: boolean;
+  onChange: (key: string, value: string | number | boolean) => void;
+}) {
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState("");
+  const [testFailed, setTestFailed] = useState(false);
+  useEffect(() => { setTestResult(""); }, [email]);
+  async function testEmail() {
+    setTesting(true);
+    setTestResult("");
+    setTestFailed(false);
+    try {
+      const result = await request<{ message: string }>("/api/settings/email/test", { method: "POST" });
+      setTestResult(result.message);
+    } catch (error) {
+      setTestFailed(true);
+      setTestResult(error instanceof Error ? error.message : "Test email failed");
+    } finally { setTesting(false); }
+  }
+  function field(key: string, title: string, hint: string, placeholder: string, type = "text") {
+    return <label htmlFor={`email-${key}`}>
+      <span>{title}</span>
+      <input id={`email-${key}`} type={type} value={String(email[key] ?? "")}
+        placeholder={placeholder} aria-describedby={`email-${key}-help`}
+        onChange={event => onChange(key, type === "number" ? Number(event.target.value) : event.target.value)} />
+      <p id={`email-${key}-help`}>{hint}</p>
+    </label>;
+  }
+  return <section className="settings-card email-card">
+    <div className="settings-card-head"><span className="settings-section-icon">@</span><div>
+      <h3>Email alerts</h3><p>Get an email when a failure stops your worker or workflow.</p>
+    </div></div>
+    <label className="email-enable" htmlFor="email-enabled">
+      <input id="email-enabled" type="checkbox" role="switch" checked={Boolean(email.enabled)}
+        onChange={event => onChange("enabled", event.target.checked)} />
+      <span><strong>Send failure alerts</strong><small>{email.enabled ? "On — alerts will be sent after you save." : "Off — configure the addresses below, then turn this on."}</small></span>
+    </label>
+    <div className="email-group">
+      <h4>Who receives the alerts?</h4>
+      <div className="settings-fields email-recipient">
+        {field("to", "Recipient email", "Send all failure notifications to this address.", "you@example.com", "email")}
+      </div>
+    </div>
+    <div className="email-group">
+      <h4>Who sends the alerts?</h4>
+      <p className="email-description">The app sends through an email account you provide. There is no built-in sender.</p>
+      <div className="settings-fields">
+        {field("from", "Sender email", "The address shown in the From line. Your email provider must allow this sender.", "alerts@example.com", "email")}
+        {field("username", "Email account login", "Usually the sender’s email address. Leave blank only if your mail server needs no login.", "alerts@example.com")}
+      </div>
+    </div>
+    <details className="email-connection" open={!email.host}>
+      <summary>Email server setup <span>SMTP connection & password</span></summary>
+      <p className="email-description">Use the SMTP settings from the provider of your sender account.</p>
+      <div className="settings-fields">
+        {field("host", "SMTP server", "Your provider’s outgoing mail server.", "smtp.example.com")}
+        <label htmlFor="email-security"><span>Connection security</span>
+          <select id="email-security" value={email.secure ? "tls" : "starttls"} aria-describedby="email-security-help"
+            onChange={event => {
+              const secure = event.target.value === "tls";
+              onChange("secure", secure);
+              if (email.port === 587 || email.port === 465) onChange("port", secure ? 465 : 587);
+            }}>
+            <option value="starttls">STARTTLS — usually port 587</option>
+            <option value="tls">TLS — usually port 465</option>
+          </select>
+          <p id="email-security-help">Both options encrypt the connection. Choose the one your provider requires.</p>
+        </label>
+        {field("port", "SMTP port", "Filled automatically for standard connections. Change only if your provider specifies another port.", "587", "number")}
+        {field("passwordEnv", "Password variable name", "This is a variable name, not your password. The app reads its value from .env.", "SMTP_PASSWORD")}
+      </div>
+      <div className="email-password-help"><strong>Where do I put the password?</strong>
+        <p>Add this line to your <code>.env</code> file, replacing the example value with your sender account’s SMTP password or app password:</p>
+        <code className="email-env-example">{String(email.passwordEnv || "SMTP_PASSWORD")}=your-smtp-password</code>
+        <p>Restart the app after changing .env, then enable alerts and save settings.</p>
+      </div>
+    </details>
+    <div className="email-test">
+      <button type="button" className="secondary-button" disabled={testing || unsaved} onClick={testEmail}>
+        {testing ? "Sending test email…" : "Send test email"}
+      </button>
+      <p>{unsaved ? "Save your email settings before sending a test." : "Uses your saved sender and recipient. Works even when failure alerts are off."}</p>
+      <p role="status" aria-live="polite" className={testFailed ? "error-text" : ""}>{testResult}</p>
+    </div>
+  </section>;
+}
+
 function SettingsEditor({ config, onSaved }: { config: Config; onSaved: (next: Config) => void }) {
   const [draft, setDraft] = useState<Config>(() => structuredClone(config));
   const [saving, setSaving] = useState(false);
@@ -117,7 +206,7 @@ function SettingsEditor({ config, onSaved }: { config: Config; onSaved: (next: C
   const dirty = JSON.stringify(draft) !== JSON.stringify(config);
   useEffect(() => { setDraft(structuredClone(config)); }, [config]);
 
-  function change(section: string, key: string, value: string | number) {
+  function change(section: string, key: string, value: string | number | boolean) {
     setDraft(current => ({ ...current, [section]: { ...current[section], [key]: value } }));
     setMessage("");
   }
@@ -143,17 +232,20 @@ function SettingsEditor({ config, onSaved }: { config: Config; onSaved: (next: C
       <div className="settings-fields"><label className="wide-field" htmlFor="close-issues-branch">
         <span>Close linked issues when merging to</span>
         <input id="close-issues-branch" type="text" placeholder="dev"
-          value={draft.github.closeLinkedIssuesWhenMergingTo ?? "dev"}
+          value={String(draft.github.closeLinkedIssuesWhenMergingTo ?? "dev")}
           onChange={event => change("github", "closeLinkedIssuesWhenMergingTo", event.target.value)}
           aria-describedby="close-issues-help" />
         <p id="close-issues-help">Linked issues close only after a successful merge into this branch. Default: dev.</p>
       </label></div>
     </section>
-    {Object.entries(draft).map(([section, values]) => <section className="settings-card" key={section}>
+    {draft.email && <EmailSettings email={draft.email} unsaved={JSON.stringify(draft.email) !== JSON.stringify(config.email)} onChange={(key, value) => change("email", key, value)} />}
+    {Object.entries(draft).filter(([section]) => section !== "email").map(([section, values]) => <section className="settings-card" key={section}>
       <div className="settings-card-head"><span className="settings-section-icon">{section.slice(0, 1).toUpperCase()}</span><div><h3>{section}</h3><p>{section === "server" ? "Listener settings are shown for reference and require a restart." : "Applied to the running server when saved."}</p></div></div>
       <div className="settings-fields">{Object.entries(values).filter(([key]) => section !== "github" || key !== "closeLinkedIssuesWhenMergingTo").map(([key, value]) => <label className={section === "prompts" || section === "queries" ? "wide-field" : ""} key={key}>
         <span>{key.replace(/([A-Z])/g, " $1").replace(/^./, letter => letter.toUpperCase())}</span>
-        {section === "prompts" || section === "queries"
+        {typeof value === "boolean"
+          ? <input type="checkbox" checked={value} onChange={event => change(section, key, event.target.checked)} />
+          : section === "prompts" || section === "queries"
           ? <textarea value={value} disabled={section === "server"} rows={section === "prompts" ? 4 : 3} onChange={event => change(section, key, event.target.value)} />
           : section === "agents"
             ? <select value={value} onChange={event => change(section, key, event.target.value)}><option value="codex">codex</option><option value="claude">claude</option></select>

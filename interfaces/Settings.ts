@@ -1,5 +1,15 @@
 import type { WorkerType } from "../classes/Worker.js";
 export interface Settings {
+  email: {
+    enabled: boolean;
+    host: string;
+    port: number;
+    secure: boolean;
+    from: string;
+    to: string;
+    username: string;
+    passwordEnv: string;
+  };
   server: {
     port: number;
     dashboardPort: number;

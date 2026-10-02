@@ -208,6 +208,7 @@ export class Orchestrator {
       repo: pullRequest.base.repo.name,
       pull_number: pullRequest.number,
     });
+    if (!data.merged) throw new Error(`Pull request #${pullRequest.number} was not merged: ${data.message}`);
     return data;
   }
 
@@ -287,6 +288,7 @@ export class Orchestrator {
           try {
             branch = await this.runTesterScan(state.repository);
           } catch (error) {
+            logger.error("Tester scan stopped", { repository: `${repository.owner.login}/${repository.name}`, repositoryId: repository.id, error });
             errors.push(error);
           }
         } while (state.pending);

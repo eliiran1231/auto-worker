@@ -12,7 +12,9 @@ export function registerWebhooks(webhooks: Webhooks, orchestrator: Orchestrator)
     work: (event: EmitterWebhookEvent<E>) => unknown,
   ): void {
     webhooks.on(name, (event) => {
-      withLogContext({ event: name, deliveryId: event.id }, () => {
+      const payload = event.payload as { repository?: { full_name?: string }; issue?: { number: number }; pull_request?: { number: number } };
+      withLogContext({ event: name, deliveryId: event.id, repository: payload.repository?.full_name,
+        issue: payload.issue?.number, pullRequest: payload.pull_request?.number }, () => {
         const started = Date.now();
 
         void Promise.resolve().then(() => work(event as EmitterWebhookEvent<E>)).catch((error: unknown) => {
@@ -49,13 +51,18 @@ export function registerWebhooks(webhooks: Webhooks, orchestrator: Orchestrator)
     if (reviewer) {
       if (reviewer.status === "idle") {
         await orchestrator.tellReviewerToReReviewPR(pullRequest);
+      } else if (reviewer.status === "error") {
+        logger.error("Re-review stopped because the reviewer is in an error state", { workerId: reviewer.workerId });
       }
     } else await orchestrator.spawnReviewerForPR(pullRequest);
   });
 
   onBackground("pull_request.closed", async ({ payload }) => {
     await orchestrator.iterationCleanup(payload.pull_request);
-    if (!payload.pull_request.merged) return;
+    if (!payload.pull_request.merged) {
+      logger.error("Iteration stopped: pull request closed without merging", { pullRequest: payload.pull_request.number });
+      return;
+    }
     await orchestrator.spawnATesterToFindBugs(payload.repository);
   });
 

@@ -6,6 +6,7 @@ import { settings, updateSettings } from "../settings.js";
 import type { Orchestrator } from "../agents/Orchestrator.js";
 import { logger, redact } from "./logger.js";
 import { AgentFactory } from "../AgentFactory.js";
+import { sendTestEmail } from "./failureEmail.js";
 
 export function createDashboardApp(store: WorkerStore, orchestrator?: Pick<Orchestrator, "startTesterScan">) {
   const app = express();
@@ -44,6 +45,7 @@ export function createDashboardApp(store: WorkerStore, orchestrator?: Pick<Orche
       const result = await orchestrator.startTesterScan(owner, repo);
       response.status(result.status === "started" ? 202 : 200).json(result);
     } catch (error) {
+      logger.error("Could not start tester scan", { repository, error });
       response.status(400).json({ error: redact(error instanceof Error ? error.message : String(error)) });
     }
   });
@@ -81,6 +83,7 @@ export function createDashboardApp(store: WorkerStore, orchestrator?: Pick<Orche
         logger.error("Dashboard agent message failed", { workerId: worker.workerId, error }));
       response.status(202).json({ status: "queued" });
     } catch (error) {
+      logger.error("Dashboard agent message failed", { workerId: worker.workerId, error });
       response.status(409).json({ error: redact(error instanceof Error ? error.message : String(error)) });
     }
   });
@@ -113,6 +116,24 @@ export function createDashboardApp(store: WorkerStore, orchestrator?: Pick<Orche
     request.on("close", () => { clearInterval(keepAlive); unsubscribe(); });
   });
   app.get("/api/settings", (_request, response) => response.json(settings));
+  app.post("/api/settings/email/test", async (request, response) => {
+    const origin = request.get("origin");
+    if (origin) {
+      let hostname = "";
+      try { hostname = new URL(origin).hostname.toLowerCase(); } catch { /* rejected below */ }
+      if (!["localhost", "127.0.0.1", "[::1]"].includes(hostname)) {
+        response.status(403).json({ error: "Test emails are local only" });
+        return;
+      }
+    }
+    try {
+      const recipient = settings.email.to;
+      await sendTestEmail();
+      response.json({ message: `Test email accepted by the mail server for ${recipient}. Check your inbox or spam folder.` });
+    } catch (error) {
+      response.status(400).json({ error: redact(error instanceof Error ? error.message : "Test email failed") });
+    }
+  });
   app.put("/api/settings", async (request, response) => {
     const origin = request.get("origin");
     if (origin) {

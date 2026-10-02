@@ -33,7 +33,7 @@ function validate(candidate: unknown, current: unknown, path = "settings"): void
   for (const [key, value] of Object.entries(existing)) {
     const next = proposed[key];
     if (typeof value === "object" && value !== null) validate(next, value, `${path}.${key}`);
-    else if (typeof next !== typeof value || (typeof next === "string" && !next.trim()) ||
+    else if (typeof next !== typeof value || (typeof next === "string" && !next.trim() && path !== "settings.email") ||
       (typeof next === "number" && (!Number.isFinite(next) || next < 0))) {
       throw new Error(`Invalid ${path}.${key}`);
     }
@@ -42,10 +42,27 @@ function validate(candidate: unknown, current: unknown, path = "settings"): void
 
 let saveQueue = Promise.resolve();
 
+export function validateEmailSettings(email: Settings["email"]): void {
+  if (!Number.isInteger(email.port) || email.port < 1 || email.port > 65535) {
+    throw new Error("Email port must be between 1 and 65535");
+  }
+  if (!email.enabled) return;
+  if (!email.host.trim() || /[\s/:]/.test(email.host)) throw new Error("Set email.host to an SMTP hostname");
+  for (const key of ["from", "to"] as const) {
+    if (!/^[^\s@<> ,;]+@[^\s@<> ,;]+\.[^\s@<> ,;]+$/.test(email[key])) {
+      throw new Error(`Set email.${key} to a valid email address`);
+    }
+  }
+  if (email.username.trim() && (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(email.passwordEnv) || !process.env[email.passwordEnv])) {
+    throw new Error("Set email.passwordEnv to an environment variable containing the SMTP password");
+  }
+}
+
 export function updateSettings(candidate: unknown): Promise<Settings> {
   const save = saveQueue.then(async () => {
     validate(candidate, settings);
     const next = candidate as Settings;
+    validateEmailSettings(next.email);
     if (JSON.stringify(next.server) !== JSON.stringify(settings.server)) {
       throw new Error("Server ports and webhook path require a restart");
     }

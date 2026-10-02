@@ -128,9 +128,11 @@ export class Worker {
       }
 
       this.say("Working", "status");
-      return withLogContext(fields, () => this.type === "codex"
+      const result = await withLogContext(fields, () => this.type === "codex"
         ? this.runCodexTurn(prompt, generation)
         : this.runClaudeTurn(prompt, generation));
+      if (result !== 0) throw new Error(`Agent turn returned failure code ${result}`);
+      return result;
     });
 
     const trackedTurn = turn.then(

@@ -21,7 +21,7 @@ test("all agent webhook routes return before the work completes and log rejectio
   const pr = { id: 999, assignee: { login: settings.github.username }, draft: false, state: "open", merged: true };
   for (const [name, action, method, extra] of [
     ["issues", "assigned", "spawnWorkerToResolveIssue", { issue: {} }],
-    ["pull_request", "opened", "spawnReviewerForPR", {}],
+    ["pull_request", "assigned", "spawnReviewerForPR", {}],
     ["pull_request", "synchronize", "spawnReviewerForPR", {}],
     ["pull_request_review", "submitted", "mergePullRequest", { review: { state: "approved" } }],
     ["pull_request_review", "submitted", "tellAssignedWorkerToAddressReview", { review: { state: "changes_requested" } }],
