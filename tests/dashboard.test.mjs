@@ -10,6 +10,18 @@ import { settings } from "../settings.ts";
 import { Worker } from "../classes/Worker.ts";
 import { AgentFactory } from "../AgentFactory.ts";
 
+process.env.DASHBOARD_USERNAME = "dashboard-test";
+process.env.DASHBOARD_PASSWORD = "dashboard-test-password";
+async function authenticatedFetch(base) {
+  const login = await globalThis.fetch(`${base}/api/auth/login`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username: process.env.DASHBOARD_USERNAME, password: process.env.DASHBOARD_PASSWORD }),
+  });
+  assert.equal(login.status, 200);
+  const cookie = login.headers.get("set-cookie").split(";")[0];
+  return (url, options = {}) => globalThis.fetch(url, { ...options, headers: { ...options.headers, Cookie: cookie } });
+}
+
 test("dashboard exposes agent history and rejects invalid live settings", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "auto-worker-dashboard-"));
   const store = new WorkerStore(path.join(directory, "dashboard.sqlite"));
@@ -24,6 +36,7 @@ test("dashboard exposes agent history and rejects invalid live settings", async 
   }).listen(0, "127.0.0.1");
   await once(server, "listening");
   const base = `http://127.0.0.1:${server.address().port}`;
+  const fetch = await authenticatedFetch(base);
   try {
     const agents = await (await fetch(`${base}/api/agents`)).json();
     assert.equal(agents[0].workerId, "worker-3");
@@ -65,6 +78,7 @@ test("dashboard queues and persists messages for busy agents of every role", asy
   const server = createDashboardApp(store).listen(0, "127.0.0.1");
   await once(server, "listening");
   const base = `http://127.0.0.1:${server.address().port}`;
+  const fetch = await authenticatedFetch(base);
   const post = (workerId, message, origin) => fetch(`${base}/api/agents/${workerId}/messages`, {
     method: "POST", headers: { "Content-Type": "application/json", ...(origin ? { Origin: origin } : {}) },
     body: JSON.stringify({ message }),

@@ -7,6 +7,7 @@ import type { Orchestrator } from "../agents/Orchestrator.js";
 import { logger, redact } from "./logger.js";
 import { AgentFactory } from "../AgentFactory.js";
 import { sendTestEmail } from "./failureEmail.js";
+import { installDashboardAuth } from "./dashboardAuth.js";
 
 export function createDashboardApp(store: WorkerStore, orchestrator?: Pick<Orchestrator, "startTesterScan">) {
   const app = express();
@@ -20,6 +21,7 @@ export function createDashboardApp(store: WorkerStore, orchestrator?: Pick<Orche
     next();
   });
   app.use("/api", express.json({ limit: "128kb" }));
+  installDashboardAuth(app);
 
   app.post("/api/tester-scans", async (request, response) => {
     const origin = request.get("origin");

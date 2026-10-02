@@ -27,6 +27,7 @@ type View = "agents" | "settings";
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, options);
+  if (response.status === 401 && !url.startsWith("/api/auth/")) window.dispatchEvent(new Event("session-expired"));
   const data = await response.json();
   if (!response.ok) throw new Error(data.error ?? `Request failed (${response.status})`);
   return data as T;
@@ -294,7 +295,45 @@ function StartTesterScan() {
   </form>;
 }
 
-function App() {
+function LoginGate() {
+  const [authenticated, setAuthenticated] = useState<boolean | null>(null);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let active = true;
+    void request("/api/auth/session").then(() => { if (active) setAuthenticated(true); }).catch(() => { if (active) setAuthenticated(false); });
+    const expired = () => { setAuthenticated(false); setError("Your session ended. Please sign in again."); };
+    window.addEventListener("session-expired", expired);
+    return () => { active = false; window.removeEventListener("session-expired", expired); };
+  }, []);
+  async function login(event: React.FormEvent) {
+    event.preventDefault(); setBusy(true); setError("");
+    try {
+      await request("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username, password }) });
+      setPassword(""); setAuthenticated(true);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Login failed"); }
+    finally { setBusy(false); }
+  }
+  async function logout() {
+    try { await request("/api/auth/logout", { method: "POST" }); setAuthenticated(false); setError(""); }
+    catch (cause) { window.alert(cause instanceof Error ? cause.message : "Logout failed"); }
+  }
+  if (authenticated) return <App onLogout={() => void logout()} />;
+  return <main className="login-page"><section className="login-card">
+    <div className="eyebrow">FARM / CONTROL ROOM</div><h1>Welcome back</h1>
+    <p>Sign in to manage your workers and settings.</p>
+    {authenticated === null ? <p role="status">Checking your session…</p> : <form onSubmit={login}>
+      <label htmlFor="login-username">Username<input id="login-username" autoComplete="username" required value={username} onChange={event => setUsername(event.target.value)} /></label>
+      <label htmlFor="login-password">Password<input id="login-password" type="password" autoComplete="current-password" required value={password} onChange={event => setPassword(event.target.value)} /></label>
+      {error && <p className="error-text" role="alert">{error}</p>}
+      <button className="primary-button" disabled={busy} type="submit">{busy ? "Signing in…" : "Sign in"}</button>
+    </form>}
+  </section></main>;
+}
+
+function App({ onLogout }: { onLogout: () => void }) {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [events, setEvents] = useState<Record<string, AgentEvent[]>>({});
   const [hasOlder, setHasOlder] = useState<Record<string, boolean>>({});
@@ -365,6 +404,7 @@ function App() {
       <div className="brand"><div className="brand-mark">F<span>·</span></div><div><strong>FARM</strong><small>CONTROL ROOM</small></div></div>
       <nav><button className={view === "agents" ? "nav-item selected" : "nav-item"} onClick={() => setView("agents")}><span>▦</span> Agents <b>{activeCount}</b></button><button className={view === "settings" ? "nav-item selected" : "nav-item"} onClick={() => setView("settings")}><span>⚙</span> Settings</button></nav>
       <div className="sidebar-spacer" />
+      <button type="button" className="secondary-button" onClick={onLogout}>Sign out</button>
       <div className="sidebar-status"><span className={`connection-dot ${connection}`} /><div><strong>{connection === "live" ? "Connected" : "Reconnecting"}</strong><small>Live event stream</small></div></div>
       <div className="sidebar-foot">AUTO WORKER <span>v1.0</span></div>
     </aside>
@@ -383,4 +423,4 @@ function App() {
   </div>;
 }
 
-createRoot(document.getElementById("root")!).render(<React.StrictMode><App /></React.StrictMode>);
+createRoot(document.getElementById("root")!).render(<React.StrictMode><LoginGate /></React.StrictMode>);
