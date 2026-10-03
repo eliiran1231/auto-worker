@@ -23,8 +23,15 @@ export function installDashboardAuth(app: Express): void {
       const origin = req.get("origin");
       if (origin) {
         let allowed = false;
-        try { allowed = ["localhost", "127.0.0.1", "[::1]"].includes(new URL(origin).hostname); } catch { /* reject */ }
-        if (!allowed) { res.status(403).json({ error: "Dashboard requests are local only" }); return; }
+        try {
+          const source = new URL(origin);
+          allowed = source.origin === `${req.protocol}://${req.get("host")}`;
+          // Support the existing loopback Vite development server.
+          if (source.protocol === "http:" && source.port === "5173" &&
+            ["localhost", "127.0.0.1", "[::1]"].includes(source.hostname) &&
+            ["localhost", "127.0.0.1", "[::1]"].includes(req.hostname)) allowed = true;
+        } catch { /* reject */ }
+        if (!allowed) { res.status(403).json({ error: "Dashboard request origin does not match this server" }); return; }
       }
       if (req.get("sec-fetch-site") === "cross-site") { res.status(403).json({ error: "Cross-site request rejected" }); return; }
     }

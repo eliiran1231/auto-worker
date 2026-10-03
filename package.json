@@ -12,6 +12,7 @@
     "dev:ui": "vite --host 127.0.0.1",
     "predev": "vite build",
     "start": "node dist/index.js",
+    "start:lan": "npm run build && node dist/index.js --lan",
     "typecheck": "tsc --noEmit",
     "test": "npm run typecheck && node --import tsx --import ./tests/setup.mjs --test tests/*.test.mjs"
   },

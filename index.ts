@@ -41,6 +41,12 @@ registerWebhooks(webhooks, orchestrator);
 
 const app = createWebhookApp(webhooks);
 
+if (process.argv.includes("--lan")) {
+  app.use(createDashboardApp(workerStore, orchestrator, { allowLan: true }));
+  app.listen(port, "0.0.0.0", () => {
+    console.log(`Dashboard, API and webhooks: http://<this-computer-LAN-IP>:${port}`);
+  });
+} else {
 app.listen(port, () => {
   console.log(`🚀 Server is listening for GitHub webhooks on port ${port}`);
 });
@@ -48,3 +54,4 @@ app.listen(port, () => {
 createDashboardApp(workerStore, orchestrator).listen(settings.server.dashboardPort, "127.0.0.1", () => {
   console.log(`Dashboard: http://127.0.0.1:${settings.server.dashboardPort}`);
 });
+}

@@ -9,12 +9,12 @@ import { AgentFactory } from "../AgentFactory.js";
 import { sendTestEmail } from "./failureEmail.js";
 import { installDashboardAuth } from "./dashboardAuth.js";
 
-export function createDashboardApp(store: WorkerStore, orchestrator?: Pick<Orchestrator, "startTesterScan">) {
+export function createDashboardApp(store: WorkerStore, orchestrator?: Pick<Orchestrator, "startTesterScan">, options: { allowLan?: boolean } = {}) {
   const app = express();
   app.disable("x-powered-by");
   app.use((request, response, next) => {
     const host = request.hostname.toLowerCase();
-    if (!["localhost", "127.0.0.1", "[::1]"].includes(host)) {
+    if (!options.allowLan && !["localhost", "127.0.0.1", "[::1]"].includes(host)) {
       response.status(403).send("Dashboard is local only");
       return;
     }
@@ -24,15 +24,6 @@ export function createDashboardApp(store: WorkerStore, orchestrator?: Pick<Orche
   installDashboardAuth(app);
 
   app.post("/api/tester-scans", async (request, response) => {
-    const origin = request.get("origin");
-    if (origin) {
-      let hostname = "";
-      try { hostname = new URL(origin).hostname.toLowerCase(); } catch { /* rejected below */ }
-      if (!["localhost", "127.0.0.1", "[::1]"].includes(hostname)) {
-        response.status(403).json({ error: "Scan requests are local only" });
-        return;
-      }
-    }
     const repository = request.body?.repository;
     if (typeof repository !== "string" || !/^[A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9_.-]+$/.test(repository.trim())) {
       response.status(400).json({ error: "Enter a GitHub repository as owner/repository" });
@@ -56,15 +47,6 @@ export function createDashboardApp(store: WorkerStore, orchestrator?: Pick<Orche
     response.json(store.load(true));
   });
   app.post("/api/agents/:workerId/messages", (request, response) => {
-    const origin = request.get("origin");
-    if (origin) {
-      let hostname = "";
-      try { hostname = new URL(origin).hostname.toLowerCase(); } catch { /* rejected below */ }
-      if (!["localhost", "127.0.0.1", "[::1]"].includes(hostname)) {
-        response.status(403).json({ error: "Agent messages are local only" });
-        return;
-      }
-    }
     const message = request.body?.message;
     if (typeof message !== "string" || !message.trim() || message.length > 32000) {
       response.status(400).json({ error: "Enter a message between 1 and 32,000 characters" });
@@ -119,15 +101,6 @@ export function createDashboardApp(store: WorkerStore, orchestrator?: Pick<Orche
   });
   app.get("/api/settings", (_request, response) => response.json(settings));
   app.post("/api/settings/email/test", async (request, response) => {
-    const origin = request.get("origin");
-    if (origin) {
-      let hostname = "";
-      try { hostname = new URL(origin).hostname.toLowerCase(); } catch { /* rejected below */ }
-      if (!["localhost", "127.0.0.1", "[::1]"].includes(hostname)) {
-        response.status(403).json({ error: "Test emails are local only" });
-        return;
-      }
-    }
     try {
       const recipient = settings.email.to;
       await sendTestEmail();
@@ -137,15 +110,6 @@ export function createDashboardApp(store: WorkerStore, orchestrator?: Pick<Orche
     }
   });
   app.put("/api/settings", async (request, response) => {
-    const origin = request.get("origin");
-    if (origin) {
-      let originHost = "";
-      try { originHost = new URL(origin).hostname.toLowerCase(); } catch { /* rejected below */ }
-      if (!["localhost", "127.0.0.1", "[::1]"].includes(originHost)) {
-        response.status(403).json({ error: "Settings changes are local only" });
-        return;
-      }
-    }
     try {
       response.json(await updateSettings(request.body));
     } catch (error) {
